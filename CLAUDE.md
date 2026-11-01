@@ -22,6 +22,9 @@
 ## 換裝（2026-11-01 使用者要求）
 開始畫面「👕 換裝」→ `#wardrobe-modal` 衣櫃（左側 `#ward-preview` 走路動畫即時預覽，`.ward-prev` sticky；手機版改成滿寬實底頂部列，否則預覽會蓋住選項）。資料在 `OUTFIT_DEFAULT`（男女預設，等同舊版固定外觀）／`OUTFIT_PRESETS`（7 套）／`WARDROBE`（頭飾、眼鏡、上衣、上衣色、下身、下身色、鞋、披風、髮色）。`drawHero(c, hero, {outfit})` 依 `curOutfit(gender)`（預設＋`SET.outfits[gender]` 覆寫）繪製，全部程式畫無圖檔；男女裝扮分開存、切換性別不互相覆蓋；照片頭像一樣可戴頭飾／眼鏡（眼鏡畫在卡通臉眼睛高度，對照片只是大略位置）。有頭飾時名字血條往上讓位（`hatH`）。按「完成」才寫入 `SET.outfits`。「英雄披風」只是通用披風造型，不要加任何特定超級英雄標誌（智財權）。
 
+## 角色畫風（2026-11-02 使用者要求美化）
+貼紙風 Q 版：所有形狀加深色描邊 `HERO_OL`（`fillOL`／`limb` 先粗深色再細彩色）、衣服左亮右暗漸層（`grad`）、手腳兩段有手肘膝蓋、左右腳前後交替＋手反向擺＋走路上下彈跳（`bob`，只 1% 身高，不影響命中）、大眼高光＋眉毛＋鼻子＋張嘴笑＋腮紅、約 3.6 秒眨眼一次（用 `performance.now()`，預覽畫面也會動）；受擊＝XX 眼＋O 嘴＋汗滴＋舉手亂揮。男生刺蝟瀏海＋翹毛＋耳朵；女生長髮畫在身體後面垂到肩下，前面側分瀏海＋兩側髮束（舊版整圈頭髮繞到下巴像鬍子，已改掉）。**頭的圓心與半徑公式不能動**——要跟 `headInfo()` 一致，命中判定靠它。
+
 ## 儲存（localStorage，全部 try/catch）
 `btc-settings`（gender/name/sens/ballSpeed/startLevel/sound/assist/debug/outfits）、`btc-face`（256px JPEG dataURL，照片只在本機）、`btc-face-src`、`btc-face-crop`、`btc-best`、`btc-leaderboard`、`btc-cam`、`btc-warned`（首訪警語）、`btcMarquee`。
 
