@@ -144,6 +144,8 @@
   .modal h3 { font-size: 19px; color: #ffd27a; }
   .modal label.row { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
   .modal input[type=range] { width: 160px; }
+  #crop-canvas { width: min(300px, 78vw); height: min(300px, 78vw); border-radius: 12px; touch-action: none; cursor: grab; background: #333; }
+  #crop-canvas:active { cursor: grabbing; }
 
   @keyframes shake {
     0%,100% { transform: translate(0,0); } 25% { transform: translate(-6px,4px); }
@@ -189,6 +191,7 @@
           </div>
           <div class="btn-row" style="justify-content:flex-start">
             <label class="btn secondary" for="face-input" style="cursor:pointer">📷 上傳長相照片</label>
+            <button type="button" id="face-adjust" class="btn secondary">✂ 調整照片</button>
             <button type="button" id="face-clear" class="btn secondary">清除照片</button>
           </div>
           <input type="file" id="face-input" accept="image/*" hidden>
@@ -245,12 +248,31 @@
   </div>
 </div>
 
+<div id="crop-modal" class="modal hidden">
+  <div class="box" style="align-items:center">
+    <h3>✂ 調整大頭照</h3>
+    <div class="small-note" style="text-align:center">拖曳照片移動位置；用滑桿、滑鼠滾輪或兩指縮放。<br>圓框裡的範圍就是角色的臉。</div>
+    <canvas id="crop-canvas" width="600" height="600"></canvas>
+    <label class="row" style="width:100%;justify-content:center;gap:8px">🔍
+      <input type="range" id="crop-zoom" min="0.6" max="5" step="0.01" style="flex:1;max-width:260px">
+      <span id="crop-zoom-val" style="min-width:42px"></span></label>
+    <div class="btn-row">
+      <button type="button" id="crop-reset" class="btn secondary">重設</button>
+      <button type="button" id="crop-cancel" class="btn secondary">取消</button>
+      <button type="button" id="crop-ok" class="btn" style="font-size:16px;padding:10px 26px">套用</button>
+    </div>
+  </div>
+</div>
+
 <div id="settings-modal" class="modal hidden">
   <div class="box">
     <h3>⚙ 常用設定</h3>
     <label class="row">角色名字（顯示在頭上）<input type="text" id="set-name" maxlength="8" placeholder="例：老闆"></label>
     <label class="row">🎯 丟球靈敏度 <span><input type="range" id="set-sens" min="1" max="5" step="1"> <b id="set-sens-val"></b></span></label>
     <div class="small-note">甩了沒丟出去 → 調高；手隨便動就亂丟 → 調低。</div>
+    <label class="row">🎯 瞄準輔助
+      <select id="set-assist"><option value="off">關（完全照手的方向）</option><option value="low">弱</option><option value="high">強</option></select></label>
+    <label class="row">顯示偵測數值（手感調校用） <input type="checkbox" id="set-debug"></label>
     <label class="row">球速
       <select id="set-speed"><option value="slow">慢</option><option value="normal">標準</option><option value="fast">快</option></select></label>
     <label class="row">從第幾關開始
@@ -284,9 +306,14 @@ const LINE_RATIO = 0.80;        // 防線位置（畫面高比例）
 const GRAVITY_RATIO = 1.0;      // 重力（畫面高/秒²）
 const SPEED_FACTOR = { slow: 0.8, normal: 1, fast: 1.25 };
 /* 丟球手勢判定基準值（靈敏度 3），單位以畫面高 H 為比例，抵銷螢幕大小差異 */
-const RISE_BASE = 0.14;         // 視窗內手掌最少上升高度（×H）
-const WINDOW_BASE = 260;        // 判定時間窗（ms）
-const SPEED_BASE = 1.1;         // 最近 50ms 以上的瞬時上升速度（×H/秒）
+/* 2026-11-01 使用者實機回報「手感不順」後放寬：0.14/260/1.1 → 0.10/350/0.8，
+ * 並加「甩太快追蹤中斷時以最後軌跡出手」與瞄準輔助。 */
+const RISE_BASE = 0.10;         // 視窗內手掌最少上升高度（×H）
+const WINDOW_BASE = 350;        // 判定時間窗（ms）
+const SPEED_BASE = 0.8;         // 最近 ≥33ms 的瞬時上升速度（×H/秒）
+const RELEASE_RELAX = 0.65;     // 手突然消失（甩太快糊掉）時的放寬倍率
+const PALM_SMOOTH = 0.55;       // 手掌座標 EMA（越小越平滑但延遲越大）
+const ASSIST = { off: 0, low: 0.35, high: 0.65 };   // 瞄準輔助：往角色頭部偏的比例
 const SENS_FACTOR = [1.45, 1.2, 1, 0.82, 0.68];   // 靈敏度 1~5：數字越大門檻越低
 const FIST_RATIO = 1.35, OPEN_RATIO = 1.7;        // 握拳→張開（備援丟法）
 const HAND_CONN = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
@@ -294,7 +321,7 @@ const HAND_CONN = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],
 
 /* ---------- 設定（localStorage，讀寫都包 try/catch） ---------- */
 const SET_KEY = 'btc-settings';
-const SET = Object.assign({ gender: 'male', name: '', sens: 3, ballSpeed: 'normal', startLevel: 1, sound: true },
+const SET = Object.assign({ gender: 'male', name: '', sens: 3, ballSpeed: 'normal', startLevel: 1, sound: true, assist: 'low', debug: false },
   (() => { try { return JSON.parse(localStorage.getItem(SET_KEY) || '{}'); } catch (e) { return {}; } })());
 function saveSet() { try { localStorage.setItem(SET_KEY, JSON.stringify(SET)); } catch (e) {} }
 function lsGet(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } }
@@ -408,7 +435,7 @@ function shake() { app.classList.remove('shake'); void app.offsetWidth; app.clas
 /* ---------- 攝影機（同 fruit-ninja-cam，記憶 key 改 btc-cam） ---------- */
 let landmarker = null, lastVideoTime = -1, currentStream = null;
 async function initCamera(deviceId) {
-  const base = { width: { ideal: 960 }, height: { ideal: 540 } };
+  const base = { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 30 } };   // 解析度降一級換取偵測幀率
   const constraints = deviceId
     ? { video: { ...base, deviceId: { exact: deviceId } }, audio: false }
     : { video: { ...base, facingMode: 'user' }, audio: false };
@@ -457,7 +484,7 @@ async function initLandmarker() {
   const fileset = await vision.FilesetResolver.forVisionTasks(CDN + '/wasm');
   const opts = {
     baseOptions: { modelAssetPath: MODEL_URL, delegate: 'GPU' },
-    runningMode: 'VIDEO', numHands: 2,
+    runningMode: 'VIDEO', numHands: 1,   // 只追一隻手：推論量減半，偵測幀率較穩
     minHandDetectionConfidence: 0.3, minHandPresenceConfidence: 0.3, minTrackingConfidence: 0.3,
   };
   try { landmarker = await vision.HandLandmarker.createFromOptions(fileset, opts); }
@@ -482,20 +509,22 @@ function effThresholds() {
 }
 /* 純函式：輸入手掌（或游標）軌跡 [{x,y,t}]，判斷最近是否出現「由下往上快速甩」。
  * 回傳 { x, y, dirx, diry, speed } 或 null。冷卻由呼叫端處理。 */
-function detectThrow(samples, now) {
-  const th = effThresholds();
+function detectThrow(samples, now, relax = 1) {
+  const t0 = effThresholds();
+  const th = { rise: t0.rise * relax, speed: t0.speed * relax, win: t0.win };
   const recent = samples.filter(s => now - s.t <= th.win);
-  if (recent.length < 3) return null;
+  if (recent.length < 2) return null;              // 低幀率（CPU 模式 ~15fps）時樣本少，2 點即可判
   const latest = recent[recent.length - 1];
   let lowest = recent[0];
   for (const s of recent) if (s.t < latest.t && s.y > lowest.y) lowest = s;
   const rise = lowest.y - latest.y;
   if (rise < th.rise) return null;
   const dx = latest.x - lowest.x;
-  if (rise < Math.abs(dx) * 0.6) return null;          // 太橫向，不算丟
+  if (rise < Math.abs(dx) * 0.5) return null;          // 太橫向，不算丟
   let ref = null;
-  for (let i = recent.length - 2; i >= 0; i--) if (latest.t - recent[i].t >= 50) { ref = recent[i]; break; }
-  if (!ref) return null;
+  for (let i = recent.length - 2; i >= 0; i--) if (latest.t - recent[i].t >= 33) { ref = recent[i]; break; }
+  if (!ref) ref = recent[recent.length - 2];
+  if (latest.t - ref.t < 1) return null;
   const vUp = (ref.y - latest.y) / ((latest.t - ref.t) / 1000);
   if (vUp < th.speed) return null;
   const len = Math.hypot(dx, rise);
@@ -511,7 +540,23 @@ function ballSpeedPx() { return H * 1.7 * (SPEED_FACTOR[SET.ballSpeed] || 1); }
 /* 依甩動方向發射 */
 function throwFromGesture(g) {
   const sp = Math.min(Math.max(g.speed * 1.1, H * 1.25), H * 2.3) * (SPEED_FACTOR[SET.ballSpeed] || 1);
-  return throwBall(g.x, g.y, g.dirx * sp, g.diry * sp);
+  let vx = g.dirx * sp, vy = g.diry * sp;
+  const a = ASSIST[SET.assist] ?? ASSIST.low;
+  if (a > 0 && G.hero) {             // 瞄準輔助：跟「正好打中頭」的初速做加權
+    const hi = headInfo(G.hero), grav = H * GRAVITY_RATIO;
+    const dx = hi.hx - g.x, dy = hi.hy - g.y, t = Math.max(0.15, Math.hypot(dx, dy) / sp);
+    vx = vx * (1 - a) + (dx / t) * a;
+    vy = vy * (1 - a) + (dy / t - 0.5 * grav * t) * a;
+  }
+  return throwBall(g.x, g.y, vx, vy);
+}
+/* 即時上升速度（給力道環與除錯顯示用） */
+function upSpeed(hist) {
+  if (hist.length < 2) return 0;
+  const a = hist[hist.length - 1];
+  let b = hist[hist.length - 2];
+  for (let i = hist.length - 2; i >= 0; i--) if (a.t - hist[i].t >= 33) { b = hist[i]; break; }
+  return a.t > b.t ? (b.y - a.y) / ((a.t - b.t) / 1000) : 0;
 }
 /* 瞄準角色頭部發射（含重力補償）：握拳→張開、滑鼠點一下用 */
 function aimedThrow(x, y, tx, ty) {
@@ -538,21 +583,31 @@ function detectHands() {
   const now = performance.now();
   try { result = landmarker.detectForVideo(video, now); } catch (e) { return; }
   const seen = new Set();
+  DBG.frames.push(now);
+  while (DBG.frames.length && now - DBG.frames[0] > 1000) DBG.frames.shift();
   (result.landmarks || []).forEach((hand, i) => {
     const key = 'h' + i;
     seen.add(key);
     const pts = hand.map(lmToScreen);
     let hs = G.hands.get(key);
-    if (!hs) { hs = { hist: [], cool: 0, fistT: 0 }; G.hands.set(key, hs); }
-    hs.pts = pts; hs.seen = now;
-    const palm = [0, 5, 9, 13, 17].reduce((a, j) => ({ x: a.x + pts[j].x / 5, y: a.y + pts[j].y / 5 }), { x: 0, y: 0 });
+    if (!hs) { hs = { hist: [], cool: 0, fistT: 0, meter: 0 }; G.hands.set(key, hs); }
+    hs.pts = pts; hs.seen = now; hs.released = false;
+    const raw = [0, 5, 9, 13, 17].reduce((a, j) => ({ x: a.x + pts[j].x / 5, y: a.y + pts[j].y / 5 }), { x: 0, y: 0 });
+    const palm = hs.palm ? { x: hs.palm.x + (raw.x - hs.palm.x) * PALM_SMOOTH, y: hs.palm.y + (raw.y - hs.palm.y) * PALM_SMOOTH } : raw;
     hs.palm = palm;
     hs.hist.push({ x: palm.x, y: palm.y, t: now });
     while (hs.hist.length && now - hs.hist[0].t > 600) hs.hist.shift();
+    const vUp = upSpeed(hs.hist), th = effThresholds();
+    hs.meter = Math.max(hs.meter * 0.8, Math.min(1.2, Math.max(0, vUp / th.speed)));
+    DBG.vUp = vUp / H; DBG.vTh = th.speed / H;
+    if (hs.hist.length > 1) {
+      const low = hs.hist.filter(s => now - s.t <= th.win).reduce((m, s) => s.y > m ? s.y : m, -Infinity);
+      DBG.rise = (low - palm.y) / H; DBG.riseTh = th.rise / H;
+    }
     if (G.state !== 'playing' || now < hs.cool) return;
     const g = detectThrow(hs.hist, now);
     if (g) {
-      if (throwFromGesture(g)) { hs.hist = []; hs.cool = now + THROW_COOLDOWN_MS; hs.fistT = 0; }
+      if (throwFromGesture(g)) { hs.hist = []; hs.cool = now + THROW_COOLDOWN_MS; hs.fistT = 0; DBG.last = '甩手出手'; }
       return;
     }
     // 備援丟法：握拳 → 0.6 秒內張開，自動瞄準角色頭部
@@ -560,12 +615,24 @@ function detectHands() {
     if (open < FIST_RATIO) hs.fistT = now;
     else if (open > OPEN_RATIO && hs.fistT && now - hs.fistT < 600) {
       const hi = headInfo(G.hero);
-      if (aimedThrow(palm.x, palm.y, hi.hx, hi.hy)) hs.cool = now + THROW_COOLDOWN_MS;
+      if (aimedThrow(palm.x, palm.y, hi.hx, hi.hy)) { hs.cool = now + THROW_COOLDOWN_MS; DBG.last = '握拳張開出手'; }
       hs.fistT = 0;
     }
   });
-  for (const [k, hs] of G.hands) if (!seen.has(k) && now - hs.seen > 300) G.hands.delete(k);
+  for (const [k, hs] of G.hands) {
+    if (seen.has(k)) continue;
+    // 甩太快手會糊掉、追蹤中斷：剛消失時用最後一段軌跡放寬再判一次
+    if (!hs.released && G.state === 'playing' && now >= hs.cool && hs.hist.length) {
+      hs.released = true;
+      const lastT = hs.hist[hs.hist.length - 1].t;
+      const g = now - lastT < 250 ? detectThrow(hs.hist, lastT, RELEASE_RELAX) : null;
+      if (g && throwFromGesture(g)) { hs.hist = []; hs.cool = now + THROW_COOLDOWN_MS; DBG.last = '手消失前出手'; }
+    }
+    if (now - hs.seen > 300) G.hands.delete(k);
+  }
 }
+const DBG = { frames: [], vUp: 0, vTh: 0, rise: 0, riseTh: 0, last: '' };
+function handleReleaseForTest(hist, lastT) { return detectThrow(hist, lastT, RELEASE_RELAX); }
 
 /* ---------- 滑鼠／觸控：往上甩放開＝丟出；點一下＝從下方瞄準點的位置丟 ---------- */
 function bindPointer() {
@@ -811,8 +878,36 @@ function drawHands() {
     ctx.shadowBlur = 0; ctx.strokeStyle = 'rgba(255,210,122,.6)'; ctx.lineWidth = 6;
     ctx.beginPath(); hs.hist.forEach((s, i) => i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y)); ctx.stroke();
     ctx.restore();
-    if (hs.palm) drawHeldBall(hs.palm.x, hs.palm.y);
+    if (hs.palm) {
+      // 力道環：往上甩的速度達到門檻時填滿變綠，讓玩家知道差多少
+      const m = Math.min(1, hs.meter || 0), R = Math.max(30, Math.min(W, H) * 0.06);
+      ctx.save(); ctx.lineCap = 'round'; ctx.lineWidth = 7;
+      ctx.strokeStyle = 'rgba(255,255,255,.18)';
+      ctx.beginPath(); ctx.arc(hs.palm.x, hs.palm.y, R, 0, Math.PI * 2); ctx.stroke();
+      if (m > 0.02) {
+        ctx.strokeStyle = m >= 1 ? '#5dff9b' : '#ffd27a';
+        ctx.beginPath(); ctx.arc(hs.palm.x, hs.palm.y, R, -Math.PI / 2, -Math.PI / 2 + m * Math.PI * 2); ctx.stroke();
+      }
+      ctx.restore();
+      drawHeldBall(hs.palm.x, hs.palm.y);
+    }
   }
+}
+function drawDebug() {
+  if (!SET.debug || G.mode !== 'cam') return;
+  const lines = [
+    `偵測幀率 ${DBG.frames.length} fps` + (DBG.frames.length < 15 ? '（偏低，電腦可能跑不動）' : ''),
+    `上甩速度 ${DBG.vUp.toFixed(2)} ／ 門檻 ${DBG.vTh.toFixed(2)}`,
+    `上升高度 ${Math.max(0, DBG.rise).toFixed(2)} ／ 門檻 ${DBG.riseTh.toFixed(2)}`,
+    `偵測到手：${G.hands.size ? '是' : '否'}　最後出手：${DBG.last || '—'}`,
+  ];
+  ctx.save();
+  ctx.font = '13px "Microsoft JhengHei", sans-serif'; ctx.textAlign = 'left';
+  const bw = 330, bh = lines.length * 19 + 12, bx = 10, by = H - bh - 52;
+  ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(bx, by, bw, bh);
+  ctx.fillStyle = '#fff';
+  lines.forEach((l, i) => ctx.fillText(l, bx + 8, by + 20 + i * 19));
+  ctx.restore();
 }
 function drawCursor() {
   const P = G.pointer;
@@ -866,6 +961,7 @@ function draw() {
   }
   ctx.globalAlpha = 1;
   if (G.mode === 'cam') drawHands(); else drawCursor();
+  drawDebug();
 }
 
 let lastT = performance.now();
@@ -887,10 +983,94 @@ function drawPreview() {
   drawHero(c, { x: pc.width / 2, y: pc.height - 24, dir: 1, walk: 0, hitT: 0 }, { h: 260, preview: true });
   document.querySelectorAll('#gender-seg button').forEach(b => b.classList.toggle('on', b.dataset.g === SET.gender));
   $('face-clear').style.display = faceImg ? '' : 'none';
+  $('face-adjust').style.display = faceImg && CROP.img ? '' : 'none';
 }
 document.querySelectorAll('#gender-seg button').forEach(b => b.addEventListener('click', () => {
   SET.gender = b.dataset.g; saveSet(); drawPreview();
 }));
+/* ---------- 大頭照裁切編輯器：拖曳移動、滑桿／滾輪／兩指縮放 ----------
+ * 原圖縮到最長邊 1024px 存 btc-face-src（之後可再按「調整照片」重裁），
+ * 裁切參數存 btc-face-crop {cx, cy, zoom}（cx/cy 為原圖座標的圓心），成品 256px 存 btc-face。 */
+const CROP = { img: null, cx: 0, cy: 0, zoom: 1, fresh: false, ptrs: new Map(), pinch: null };
+const cropCv = $('crop-canvas'), cropCtx = cropCv.getContext('2d');
+const CROP_S = cropCv.width, CROP_R = CROP_S * 0.42;
+function cropScale() { return CROP_S / Math.min(CROP.img.width, CROP.img.height) * CROP.zoom; }
+function cropDefault() {
+  const im = CROP.img;
+  CROP.cx = im.width / 2;
+  CROP.cy = Math.max(im.height * 0.3, Math.min(im.height * 0.7, im.height * 0.38));   // 人臉通常偏上
+  CROP.zoom = 1;
+}
+function cropDraw() {
+  const c = cropCtx, s = cropScale(), im = CROP.img;
+  c.fillStyle = '#444'; c.fillRect(0, 0, CROP_S, CROP_S);
+  c.drawImage(im, CROP_S / 2 - CROP.cx * s, CROP_S / 2 - CROP.cy * s, im.width * s, im.height * s);
+  c.save();
+  c.fillStyle = 'rgba(0,0,0,.55)';
+  c.beginPath(); c.rect(0, 0, CROP_S, CROP_S); c.arc(CROP_S / 2, CROP_S / 2, CROP_R, 0, Math.PI * 2, true); c.fill('evenodd');
+  c.strokeStyle = '#fff'; c.lineWidth = 4; c.setLineDash([12, 8]);
+  c.beginPath(); c.arc(CROP_S / 2, CROP_S / 2, CROP_R, 0, Math.PI * 2); c.stroke();
+  c.restore();
+  $('crop-zoom').value = CROP.zoom;
+  $('crop-zoom-val').textContent = Math.round(CROP.zoom * 100) + '%';
+}
+function cropSetZoom(z) { CROP.zoom = Math.min(5, Math.max(0.6, z)); cropDraw(); }
+function openCrop(fresh) {
+  if (!CROP.img) return;
+  CROP.fresh = fresh;
+  const saved = (() => { try { return JSON.parse(lsGet('btc-face-crop', 'null')); } catch (e) { return null; } })();
+  if (!fresh && saved) Object.assign(CROP, { cx: saved.cx, cy: saved.cy, zoom: saved.zoom }); else cropDefault();
+  $('crop-modal').classList.remove('hidden');
+  cropDraw();
+}
+function cropApply() {
+  const im = CROP.img, side = 2 * CROP_R / cropScale(), OUT = 256, k = OUT / side;
+  const cv = document.createElement('canvas'); cv.width = cv.height = OUT;
+  const c = cv.getContext('2d');
+  c.fillStyle = '#444'; c.fillRect(0, 0, OUT, OUT);
+  c.drawImage(im, -(CROP.cx - side / 2) * k, -(CROP.cy - side / 2) * k, im.width * k, im.height * k);
+  const url = cv.toDataURL('image/jpeg', 0.88);
+  const ok = lsSet('btc-face', url) && lsSet('btc-face-crop', JSON.stringify({ cx: CROP.cx, cy: CROP.cy, zoom: CROP.zoom }));
+  const fi = new Image(); fi.onload = () => { faceImg = fi; drawPreview(); }; fi.src = url;
+  $('face-msg').textContent = ok ? '✅ 已套用照片' : '✅ 已套用（瀏覽器不允許儲存，重新整理後需重新上傳）';
+  $('crop-modal').classList.add('hidden');
+}
+function cropPos(e) { const r = cropCv.getBoundingClientRect(); return { x: (e.clientX - r.left) * CROP_S / r.width, y: (e.clientY - r.top) * CROP_S / r.height }; }
+cropCv.addEventListener('pointerdown', e => {
+  CROP.ptrs.set(e.pointerId, cropPos(e));
+  try { cropCv.setPointerCapture(e.pointerId); } catch (_) {}
+  if (CROP.ptrs.size === 2) { const [a, b] = [...CROP.ptrs.values()]; CROP.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), z: CROP.zoom }; }
+});
+cropCv.addEventListener('pointermove', e => {
+  if (!CROP.ptrs.has(e.pointerId)) return;
+  const p = cropPos(e), prev = CROP.ptrs.get(e.pointerId);
+  CROP.ptrs.set(e.pointerId, p);
+  if (CROP.ptrs.size >= 2 && CROP.pinch) {
+    const [a, b] = [...CROP.ptrs.values()];
+    cropSetZoom(CROP.pinch.z * Math.hypot(a.x - b.x, a.y - b.y) / (CROP.pinch.d || 1));
+  } else if (CROP.ptrs.size === 1) {
+    const s = cropScale();
+    CROP.cx -= (p.x - prev.x) / s; CROP.cy -= (p.y - prev.y) / s;
+    cropDraw();
+  }
+});
+const cropUp = e => { CROP.ptrs.delete(e.pointerId); if (CROP.ptrs.size < 2) CROP.pinch = null; };
+cropCv.addEventListener('pointerup', cropUp);
+cropCv.addEventListener('pointercancel', cropUp);
+cropCv.addEventListener('wheel', e => { e.preventDefault(); cropSetZoom(CROP.zoom * Math.exp(-e.deltaY * 0.0015)); }, { passive: false });
+$('crop-zoom').addEventListener('input', e => cropSetZoom(+e.target.value));
+$('crop-reset').addEventListener('click', () => { cropDefault(); cropDraw(); });
+$('crop-cancel').addEventListener('click', () => {
+  $('crop-modal').classList.add('hidden');
+  if (CROP.fresh) loadFaceSrc();      // 新上傳但取消：還原成原本那張的來源圖
+});
+$('crop-ok').addEventListener('click', cropApply);
+$('face-adjust').addEventListener('click', () => openCrop(false));
+function loadFaceSrc() {
+  const d = lsGet('btc-face-src', '');
+  if (!d) { CROP.img = null; drawPreview(); return; }
+  const im = new Image(); im.onload = () => { CROP.img = im; drawPreview(); }; im.src = d;
+}
 $('face-input').addEventListener('change', e => {
   const file = e.target.files && e.target.files[0];
   e.target.value = '';
@@ -900,22 +1080,28 @@ $('face-input').addEventListener('change', e => {
   reader.onload = () => {
     const img = new Image();
     img.onload = () => {
-      // 置中裁成正方形、縮成 256px（人臉通常在照片偏上方，垂直取上 1/3 處為中心）
-      const S = 256, cv = document.createElement('canvas'); cv.width = cv.height = S;
-      const side = Math.min(img.width, img.height);
-      const sx = (img.width - side) / 2, sy = Math.max(0, Math.min(img.height - side, img.height * 0.38 - side / 2));
-      cv.getContext('2d').drawImage(img, sx, sy, side, side, 0, 0, S, S);
+      const k = Math.min(1, 1024 / Math.max(img.width, img.height));
+      const cv = document.createElement('canvas');
+      cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
       const url = cv.toDataURL('image/jpeg', 0.85);
-      const saved = lsSet('btc-face', url);
-      const fi = new Image(); fi.onload = () => { faceImg = fi; drawPreview(); }; fi.src = url;
-      $('face-msg').textContent = saved ? '✅ 已套用照片' : '✅ 已套用（瀏覽器不允許儲存，重新整理後需重新上傳）';
+      const im = new Image();
+      im.onload = () => {
+        CROP.img = im;
+        if (!lsSet('btc-face-src', url)) $('face-msg').textContent = '（原圖太大無法保存，之後不能再重新調整）';
+        openCrop(true);
+      };
+      im.src = url;
     };
     img.onerror = () => { $('face-msg').textContent = '無法讀取這張圖片'; };
     img.src = reader.result;
   };
   reader.readAsDataURL(file);
 });
-$('face-clear').addEventListener('click', () => { lsDel('btc-face'); faceImg = null; $('face-msg').textContent = '已改回卡通臉'; drawPreview(); });
+$('face-clear').addEventListener('click', () => {
+  lsDel('btc-face'); lsDel('btc-face-src'); lsDel('btc-face-crop');
+  faceImg = null; CROP.img = null; $('face-msg').textContent = '已改回卡通臉'; drawPreview();
+});
 
 /* ---------- 結算與排行榜 ---------- */
 const LB_KEY = 'btc-leaderboard';
@@ -1041,6 +1227,7 @@ $('restart-btn').addEventListener('click', () => { if (G.mode === 'none') setMod
 function openSettings() {
   $('set-name').value = SET.name; $('set-sens').value = SET.sens; $('set-sens-val').textContent = SET.sens;
   $('set-speed').value = SET.ballSpeed; $('set-level').value = SET.startLevel; $('set-sound').checked = !!SET.sound;
+  $('set-assist').value = SET.assist; $('set-debug').checked = !!SET.debug;
   $('settings-modal').classList.remove('hidden');
 }
 $('set-sens').addEventListener('input', e => { $('set-sens-val').textContent = e.target.value; });
@@ -1049,6 +1236,7 @@ $('settings-ok').addEventListener('click', () => {
   SET.name = $('set-name').value.trim().slice(0, 8);
   SET.sens = +$('set-sens').value; SET.ballSpeed = $('set-speed').value;
   SET.startLevel = +$('set-level').value; SET.sound = $('set-sound').checked;
+  SET.assist = $('set-assist').value; SET.debug = $('set-debug').checked;
   saveSet();
   $('settings-modal').classList.add('hidden');
 });
@@ -1067,11 +1255,12 @@ G._test = {
   throwBall, aimedThrow, detectThrow, effThresholds, headInfo, rowsLeft,
   setHeroRow: r => { G.hero.row = r; G.hero.y = heroTargetY(); },
   forceEdge: () => { G.hero.dashT = 0; G.hero.pauseT = 0; G.hero.dir = 1; G.hero.x = W - heroMargin() - 0.5; },
-  set: SET,
+  set: SET, release: handleReleaseForTest, throwFromGesture, crop: CROP, cropApply, cropSetZoom,
 };
 
 bindPointer();
 loadFace();
+loadFaceSrc();
 drawPreview();
 </script>
 

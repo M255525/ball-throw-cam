@@ -8,20 +8,26 @@
 - 同時最多 `MAX_BALLS=3` 顆在空中，重力 1.0×H/s²。
 - 這些規則是使用者只描述了「左右移動、碰邊降一格、被丟球、太低就輸」後我自行決定的，使用者若要改依此調整。
 
-## 丟球判定
-- 體感：HandLandmarker（numHands 2），手掌點＝landmark 0/5/9/13/17 平均。`detectThrow(samples, now)` 是純函式：時間窗內最低點→最新點上升 ≥ rise 門檻、上升量 ≥ 0.6×橫向位移、最近 ≥50ms 瞬時上升速度 ≥ speed 門檻。門檻以 H 為比例（`RISE_BASE=0.14`、`WINDOW_BASE=260ms`、`SPEED_BASE=1.1`），`effThresholds()` 依靈敏度 1~5（`SENS_FACTOR`）縮放。冷卻 350ms。
-- 備援：握拳（`handOpenness<1.35`）→ 0.6 秒內張開（>1.7）＝`aimedThrow` 自動瞄準頭部（含重力補償）。
+## 丟球判定（2026-11-01 使用者實機回報「手感不是很順」後改版）
+- 體感：HandLandmarker（**numHands 1**、攝影機 640×360，減負擔拉高偵測幀率），手掌點＝landmark 0/5/9/13/17 平均再做 EMA（`PALM_SMOOTH=0.55`）。`detectThrow(samples, now, relax=1)` 是純函式：時間窗內最低點→最新點上升 ≥ rise 門檻、上升量 ≥ 0.5×橫向位移、最近 ≥33ms 瞬時上升速度 ≥ speed 門檻（樣本只要 2 點，CPU 模式 15fps 也能判）。基準值 `RISE_BASE=0.10`、`WINDOW_BASE=350ms`、`SPEED_BASE=0.8`（舊版 0.14/260/1.1 太嚴），`effThresholds()` 依靈敏度 1~5（`SENS_FACTOR`）縮放。冷卻 350ms。
+- **手消失補判**：甩太快手會糊掉、追蹤中斷——手剛消失（最後樣本 <250ms）時用 `RELEASE_RELAX=0.65` 放寬門檻再判一次（`hs.released` 防重複）。
+- **瞄準輔助** `SET.assist`（off/low/high＝0/0.35/0.65，預設 low）：`throwFromGesture` 把甩動初速與「正好打中頭（含重力補償）」的初速加權；滑鼠拖曳也套用。
+- **力道環**：手掌外圈依 `upSpeed/門檻` 填滿，達門檻變綠＝會出手。**偵測數值面板**（設定「顯示偵測數值」，只在體感模式）：偵測 fps、上甩速度／門檻、上升高度／門檻、最後出手方式——使用者回報手感時請他開這個看數字再調。
+- 備援：握拳（`handOpenness<1.35`）→ 0.6 秒內張開（>1.7）＝`aimedThrow` 自動瞄準頭部。
 - 滑鼠／觸控：往上拖曳放開＝依方向與放開前 120ms 速度丟；點一下（<25px）＝從下方中央瞄準點擊處丟。
 
+## 大頭照裁切（2026-11-01 使用者要求可放大縮小找最合適區域）
+上傳後開 `#crop-modal`：拖曳移動、滑桿／滾輪／兩指縮放（zoom 0.6~5），虛線圓框（`CROP_R=0.42×畫布`）＝成品範圍。原圖縮到最長邊 1024 存 `btc-face-src`，參數 `btc-face-crop {cx,cy,zoom}`（原圖座標圓心），成品 256px 存 `btc-face`；「✂ 調整照片」沿用上次參數重裁，新上傳按取消不會覆蓋原照片。
+
 ## 儲存（localStorage，全部 try/catch）
-`btc-settings`（gender/name/sens/ballSpeed/startLevel/sound）、`btc-face`（256px JPEG dataURL，照片只在本機）、`btc-best`、`btc-leaderboard`、`btc-cam`、`btc-warned`（首訪警語）、`btcMarquee`。
+`btc-settings`（gender/name/sens/ballSpeed/startLevel/sound/assist/debug）、`btc-face`（256px JPEG dataURL，照片只在本機）、`btc-face-src`、`btc-face-crop`、`btc-best`、`btc-leaderboard`、`btc-cam`、`btc-warned`（首訪警語）、`btcMarquee`。
 
 ## 已知限制
-- 丟球門檻只用合成軌跡驗證過（快速上甩觸發、慢抬手與橫揮不觸發、靈敏度 5 才接受 0.12H 小動作），**尚未用真實攝影機測手感**；真機若判定不準，先請使用者調靈敏度滑桿，調到極限仍不行才改 `_BASE` 常數。
+- 丟球門檻只用合成軌跡驗證過（30fps／15fps 甩手、左上甩會觸發；慢抬手、橫揮、手抖不觸發；糊掉的半段甩手靠放寬補判接住）。第一版使用者實機覺得不順，已放寬＋加補判／輔助／力道環；**改版後尚未有真機回饋**。下一步請使用者開「顯示偵測數值」回報 fps 與上甩速度，再調 `_BASE`。
 - 握拳判定比例、鏡像方向沿用 fruit-ninja-cam 慣例，未經真人驗證。
 
 ## 測試
 - 本機：`python -m http.server 8847`（launch.json 名稱 `ball-throw-cam`）。
 - **只走滑鼠模式**：`document.getElementById('mouse-btn').click()` 後先確認 `__game.mode==='mouse'`，避免誤開真實攝影機。
-- `window.__game._test`：`step(dt)`、`throwBall(x,y,vx,vy)`、`aimedThrow`、`detectThrow`、`effThresholds`、`headInfo(hero)`、`rowsLeft`、`setHeroRow(r)`、`forceEdge()`、`set`（設定物件）。斷言要在同一次 evaluate 內做完（背景 rAF 迴圈會讓角色繼續走、降格）；測命中時先把 `G.bannerTime` 設大讓角色停住。
+- `window.__game._test`：`step(dt)`、`throwBall(x,y,vx,vy)`、`aimedThrow`、`detectThrow`、`effThresholds`、`headInfo(hero)`、`rowsLeft`、`setHeroRow(r)`、`forceEdge()`、`set`（設定物件）、`release(hist,lastT)`（手消失補判）、`throwFromGesture`、`crop`／`cropApply`／`cropSetZoom`（裁切）。斷言要在同一次 evaluate 內做完（背景 rAF 迴圈會讓角色繼續走、降格）；測命中時先把 `G.bannerTime` 設大讓角色停住。
 - 2026-11-01 已驗證：碰邊反向＋降格、命中加分扣血上推、球數上限、過關換關、越過防線 Game Over、真滑鼠拖曳丟球、照片上傳／女生角色、375px 無溢出、console 無錯誤。
