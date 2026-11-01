@@ -19,8 +19,11 @@
 ## 大頭照裁切（2026-11-01 使用者要求可放大縮小找最合適區域）
 上傳後開 `#crop-modal`：拖曳移動、滑桿／滾輪／兩指縮放（zoom 0.6~5），虛線圓框（`CROP_R=0.42×畫布`）＝成品範圍。原圖縮到最長邊 1024 存 `btc-face-src`，參數 `btc-face-crop {cx,cy,zoom}`（原圖座標圓心），成品 256px 存 `btc-face`；「✂ 調整照片」沿用上次參數重裁，新上傳按取消不會覆蓋原照片。
 
+## 換裝（2026-11-01 使用者要求）
+開始畫面「👕 換裝」→ `#wardrobe-modal` 衣櫃（左側 `#ward-preview` 走路動畫即時預覽，`.ward-prev` sticky；手機版改成滿寬實底頂部列，否則預覽會蓋住選項）。資料在 `OUTFIT_DEFAULT`（男女預設，等同舊版固定外觀）／`OUTFIT_PRESETS`（7 套）／`WARDROBE`（頭飾、眼鏡、上衣、上衣色、下身、下身色、鞋、披風、髮色）。`drawHero(c, hero, {outfit})` 依 `curOutfit(gender)`（預設＋`SET.outfits[gender]` 覆寫）繪製，全部程式畫無圖檔；男女裝扮分開存、切換性別不互相覆蓋；照片頭像一樣可戴頭飾／眼鏡（眼鏡畫在卡通臉眼睛高度，對照片只是大略位置）。有頭飾時名字血條往上讓位（`hatH`）。按「完成」才寫入 `SET.outfits`。「英雄披風」只是通用披風造型，不要加任何特定超級英雄標誌（智財權）。
+
 ## 儲存（localStorage，全部 try/catch）
-`btc-settings`（gender/name/sens/ballSpeed/startLevel/sound/assist/debug）、`btc-face`（256px JPEG dataURL，照片只在本機）、`btc-face-src`、`btc-face-crop`、`btc-best`、`btc-leaderboard`、`btc-cam`、`btc-warned`（首訪警語）、`btcMarquee`。
+`btc-settings`（gender/name/sens/ballSpeed/startLevel/sound/assist/debug/outfits）、`btc-face`（256px JPEG dataURL，照片只在本機）、`btc-face-src`、`btc-face-crop`、`btc-best`、`btc-leaderboard`、`btc-cam`、`btc-warned`（首訪警語）、`btcMarquee`。
 
 ## 已知限制
 - 丟球門檻只用合成軌跡驗證過（30fps／15fps 甩手、左上甩會觸發；慢抬手、橫揮、手抖不觸發；糊掉的半段甩手靠放寬補判接住）。第一版使用者實機覺得不順，已放寬＋加補判／輔助／力道環；**改版後尚未有真機回饋**。下一步請使用者開「顯示偵測數值」回報 fps 與上甩速度，再調 `_BASE`。
@@ -29,5 +32,5 @@
 ## 測試
 - 本機：`python -m http.server 8847`（launch.json 名稱 `ball-throw-cam`）。
 - **只走滑鼠模式**：`document.getElementById('mouse-btn').click()` 後先確認 `__game.mode==='mouse'`，避免誤開真實攝影機。
-- `window.__game._test`：`step(dt)`、`throwBall(x,y,vx,vy)`、`aimedThrow`、`detectThrow`、`effThresholds`、`headInfo(hero)`、`rowsLeft`、`setHeroRow(r)`、`forceEdge()`、`set`（設定物件）、`release(hist,lastT)`（手消失補判）、`throwFromGesture`、`crop`／`cropApply`／`cropSetZoom`（裁切）。斷言要在同一次 evaluate 內做完（背景 rAF 迴圈會讓角色繼續走、降格）；測命中時先把 `G.bannerTime` 設大讓角色停住。
+- `window.__game._test`：`step(dt)`、`throwBall(x,y,vx,vy)`、`aimedThrow`、`detectThrow`、`effThresholds`、`headInfo(hero)`、`rowsLeft`、`setHeroRow(r)`、`forceEdge()`、`set`（設定物件）、`release(hist,lastT)`（手消失補判）、`throwFromGesture`、`curOutfit`、`ward`、`drawHero`、`crop`／`cropApply`／`cropSetZoom`（裁切）。斷言要在同一次 evaluate 內做完（背景 rAF 迴圈會讓角色繼續走、降格）；測命中時先把 `G.bannerTime` 設大讓角色停住。
 - 2026-11-01 已驗證：碰邊反向＋降格、命中加分扣血上推、球數上限、過關換關、越過防線 Game Over、真滑鼠拖曳丟球、照片上傳／女生角色、375px 無溢出、console 無錯誤。

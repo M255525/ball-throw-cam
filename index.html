@@ -146,6 +146,20 @@
   .modal input[type=range] { width: 160px; }
   #crop-canvas { width: min(300px, 78vw); height: min(300px, 78vw); border-radius: 12px; touch-action: none; cursor: grab; background: #333; }
   #crop-canvas:active { cursor: grabbing; }
+  .modal .box.wide { max-width: 760px; }
+  .ward-wrap { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; justify-content: center; }
+  .ward-prev { position: sticky; top: 0; z-index: 1; flex-shrink: 0; background: #16213f; padding: 4px 0; }
+  #ward-preview { display: block; width: 180px; height: 240px; background: #1f2b4d; border-radius: 12px; margin: 0 auto; }
+  #ward-opts { flex: 1; min-width: 260px; display: flex; flex-direction: column; gap: 10px; }
+  .ward-row .lbl { font-size: 13px; color: #ffd27a; font-weight: 700; margin-bottom: 4px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font-family: inherit; font-size: 13px; color: #fff; padding: 5px 11px; border-radius: 999px; cursor: pointer;
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.25); }
+  .chip.on { background: linear-gradient(135deg, #ff7a2f, #e8452c); border-color: transparent; font-weight: 700; }
+  .sw { width: 26px; height: 26px; border-radius: 50%; cursor: pointer; border: 2px solid rgba(255,255,255,.35); padding: 0; }
+  .sw.on { outline: 3px solid #ffd27a; outline-offset: 2px; }
+  .sw.none { background: repeating-linear-gradient(45deg, #555 0 4px, #333 4px 8px); }
+  @media (max-width: 560px) { .ward-prev { width: 100%; } #ward-preview { width: 105px; height: 140px; } }
 
   @keyframes shake {
     0%,100% { transform: translate(0,0); } 25% { transform: translate(-6px,4px); }
@@ -191,6 +205,7 @@
           </div>
           <div class="btn-row" style="justify-content:flex-start">
             <label class="btn secondary" for="face-input" style="cursor:pointer">📷 上傳長相照片</label>
+            <button type="button" id="ward-btn" class="btn secondary">👕 換裝</button>
             <button type="button" id="face-adjust" class="btn secondary">✂ 調整照片</button>
             <button type="button" id="face-clear" class="btn secondary">清除照片</button>
           </div>
@@ -260,6 +275,22 @@
       <button type="button" id="crop-reset" class="btn secondary">重設</button>
       <button type="button" id="crop-cancel" class="btn secondary">取消</button>
       <button type="button" id="crop-ok" class="btn" style="font-size:16px;padding:10px 26px">套用</button>
+    </div>
+  </div>
+</div>
+
+<div id="wardrobe-modal" class="modal hidden">
+  <div class="box wide">
+    <h3>👕 換裝</h3>
+    <div class="ward-wrap">
+      <div class="ward-prev"><canvas id="ward-preview" width="300" height="400"></canvas></div>
+      <div id="ward-opts"></div>
+    </div>
+    <div class="btn-row">
+      <button type="button" id="ward-reset" class="btn secondary">恢復預設</button>
+      <button type="button" id="ward-random" class="btn secondary">🎲 隨機</button>
+      <button type="button" id="ward-cancel" class="btn secondary">取消</button>
+      <button type="button" id="ward-ok" class="btn" style="font-size:16px;padding:10px 26px">完成</button>
     </div>
   </div>
 </div>
@@ -771,50 +802,132 @@ function update(dt) {
 }
 
 /* ---------- 繪圖 ---------- */
+/* ---------- 換裝：衣櫃資料 ----------
+ * 男女各自一套（SET.outfits.male / .female），切換性別不互相覆蓋；全部程式繪製，無外部圖檔。 */
+const OUTFIT_DEFAULT = {
+  male:   { top: 'tshirt', topColor: '#3b82f6', bottom: 'pants', bottomColor: '#1e3a8a', shoes: '#222222', hat: 'none', glasses: 'none', cape: 'none', hair: '#2b1d14' },
+  female: { top: 'dress',  topColor: '#ec4899', bottom: 'pants', bottomColor: '#9d174d', shoes: '#222222', hat: 'none', glasses: 'none', cape: 'none', hair: '#5b3a1e' },
+};
+const OUTFIT_PRESETS = [
+  ['💼 上班族', { top: 'suit', topColor: '#1f2937', bottom: 'pants', bottomColor: '#374151', shoes: '#111111', hat: 'none', glasses: 'round', cape: 'none' }],
+  ['🏃 運動員', { top: 'stripe', topColor: '#22c55e', bottom: 'shorts', bottomColor: '#111827', shoes: '#f97316', hat: 'cap', glasses: 'none', cape: 'none' }],
+  ['👑 國王', { top: 'tshirt', topColor: '#7c3aed', bottom: 'pants', bottomColor: '#4c1d95', shoes: '#92400e', hat: 'crown', glasses: 'none', cape: '#b91c1c' }],
+  ['🦸 英雄披風', { top: 'tshirt', topColor: '#2563eb', bottom: 'pants', bottomColor: '#1e40af', shoes: '#dc2626', hat: 'none', glasses: 'none', cape: '#dc2626' }],
+  ['🎒 學生', { top: 'hoodie', topColor: '#0ea5e9', bottom: 'pants', bottomColor: '#334155', shoes: '#ffffff', hat: 'none', glasses: 'round', cape: 'none' }],
+  ['🎉 派對', { top: 'stripe', topColor: '#f59e0b', bottom: 'skirt', bottomColor: '#ec4899', shoes: '#7c3aed', hat: 'party', glasses: 'sun', cape: 'none' }],
+  ['👷 工地', { top: 'tshirt', topColor: '#f97316', bottom: 'pants', bottomColor: '#1e3a8a', shoes: '#92400e', hat: 'helmet', glasses: 'none', cape: 'none' }],
+];
+const PALETTE = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#0ea5e9', '#3b82f6', '#7c3aed', '#ec4899', '#ffffff', '#9ca3af', '#1f2937', '#111111', '#92400e'];
+const HAIR_PALETTE = ['#2b1d14', '#5b3a1e', '#a16207', '#facc15', '#e5e7eb', '#dc2626', '#7c3aed', '#2563eb'];
+const WARDROBE = [
+  { key: 'hat', label: '頭飾', opts: [['none', '無'], ['cap', '棒球帽'], ['crown', '皇冠'], ['party', '派對帽'], ['bow', '蝴蝶結'], ['helmet', '安全帽']] },
+  { key: 'glasses', label: '眼鏡', opts: [['none', '無'], ['sun', '墨鏡'], ['round', '圓框眼鏡']] },
+  { key: 'top', label: '上衣', opts: [['tshirt', 'T 恤'], ['suit', '西裝領帶'], ['dress', '洋裝'], ['stripe', '條紋衫'], ['hoodie', '帽 T']] },
+  { key: 'topColor', label: '上衣顏色', palette: PALETTE },
+  { key: 'bottom', label: '下身', opts: [['pants', '長褲'], ['shorts', '短褲'], ['skirt', '裙子']] },
+  { key: 'bottomColor', label: '下身顏色', palette: PALETTE },
+  { key: 'shoes', label: '鞋子', palette: PALETTE },
+  { key: 'cape', label: '披風', palette: PALETTE, none: true },
+  { key: 'hair', label: '髮色', palette: HAIR_PALETTE },
+];
+function curOutfit(gender = SET.gender) {
+  return Object.assign({}, OUTFIT_DEFAULT[gender] || OUTFIT_DEFAULT.male, (SET.outfits || {})[gender] || {});
+}
+function shade(hex, k) {   // k<0 變暗
+  const n = parseInt(hex.slice(1), 16), f = v => Math.max(0, Math.min(255, Math.round(v * (1 + k))));
+  return '#' + [n >> 16, (n >> 8) & 255, n & 255].map(f).map(v => v.toString(16).padStart(2, '0')).join('');
+}
+
 function drawHero(c, hero, opt = {}) {
   const h = opt.h || heroH();
   const r = h * (faceImg ? 0.19 : 0.16);
-  const female = (opt.gender || SET.gender) === 'female';
+  const gender = opt.gender || SET.gender, female = gender === 'female';
+  const o = opt.outfit || curOutfit(gender);
   const hitT = hero.hitT || 0;
   const x = hero.x + (hitT > 0 ? Math.sin(G.time * 70) * 6 * hitT : 0), y = hero.y;
+  const dir = hero.dir || 1;
   const ph = hero.walk || 0, sw = Math.sin(ph);
-  const skin = '#f6c9a0', hair = female ? '#5b3a1e' : '#2b1d14';
-  const shirt = female ? '#ec4899' : '#3b82f6', pants = female ? '#9d174d' : '#1e3a8a';
+  const skin = '#f6c9a0', hair = o.hair;
   const hipY = y - h * 0.40, shY = y - h * 0.70, headY = shY - r * 0.92;
+  const bodyW = h * 0.30, bodyBottom = hipY + h * 0.05;
   c.save();
   c.lineCap = 'round';
   // 影子
   c.fillStyle = 'rgba(0,0,0,.25)';
   c.beginPath(); c.ellipse(x, y + 3, h * 0.2, h * 0.04, 0, 0, Math.PI * 2); c.fill();
-  // 腿
-  c.strokeStyle = pants; c.lineWidth = h * 0.075;
-  for (const s of [-1, 1]) {
-    c.beginPath(); c.moveTo(x + s * h * 0.07, hipY);
-    c.lineTo(x + s * h * 0.07 + s * sw * h * 0.1, y - h * 0.03); c.stroke();
-    c.fillStyle = '#222';
-    c.beginPath(); c.ellipse(x + s * h * 0.07 + s * sw * h * 0.1 + hero.dir * h * 0.02, y - h * 0.015, h * 0.05, h * 0.028, 0, 0, Math.PI * 2); c.fill();
+  // 披風（在身體後面，隨走路往後飄）
+  if (o.cape && o.cape !== 'none') {
+    const fl = -dir * h * (0.08 + 0.03 * Math.abs(sw));
+    c.fillStyle = o.cape;
+    c.beginPath();
+    c.moveTo(x - h * 0.15, shY + h * 0.01); c.lineTo(x + h * 0.15, shY + h * 0.01);
+    c.quadraticCurveTo(x + h * 0.24 + fl, y - h * 0.25, x + h * 0.2 + fl, y - h * 0.1);
+    c.lineTo(x - h * 0.2 + fl, y - h * 0.1);
+    c.quadraticCurveTo(x - h * 0.24 + fl, y - h * 0.25, x - h * 0.15, shY + h * 0.01);
+    c.fill();
   }
-  // 身體
-  c.fillStyle = shirt;
-  if (female) {
+  // 腿＋鞋
+  for (const s of [-1, 1]) {
+    const lx0 = x + s * h * 0.07, lx1 = lx0 + s * sw * h * 0.1, ly1 = y - h * 0.03;
+    c.lineWidth = h * 0.075;
+    c.strokeStyle = o.bottom === 'pants' ? o.bottomColor : skin;
+    c.beginPath(); c.moveTo(lx0, hipY); c.lineTo(lx1, ly1); c.stroke();
+    if (o.bottom === 'shorts') {
+      c.strokeStyle = o.bottomColor; c.lineWidth = h * 0.09;
+      c.beginPath(); c.moveTo(lx0, hipY); c.lineTo(lx0 + (lx1 - lx0) * 0.45, hipY + (ly1 - hipY) * 0.45); c.stroke();
+    }
+    c.fillStyle = o.shoes;
+    c.beginPath(); c.ellipse(lx1 + dir * h * 0.02, y - h * 0.015, h * 0.05, h * 0.028, 0, 0, Math.PI * 2); c.fill();
+  }
+  // 裙子
+  if (o.bottom === 'skirt') {
+    c.fillStyle = o.bottomColor;
+    c.beginPath();
+    c.moveTo(x - h * 0.15, hipY - h * 0.04); c.lineTo(x + h * 0.15, hipY - h * 0.04);
+    c.lineTo(x + h * 0.23, hipY + h * 0.13); c.lineTo(x - h * 0.23, hipY + h * 0.13); c.closePath(); c.fill();
+  }
+  // 帽 T 的帽子（在脖子後面）
+  if (o.top === 'hoodie') { c.fillStyle = shade(o.topColor, -0.25); c.beginPath(); c.ellipse(x, shY + h * 0.02, h * 0.13, h * 0.06, 0, 0, Math.PI * 2); c.fill(); }
+  // 上衣
+  c.fillStyle = o.topColor;
+  if (o.top === 'dress') {
     c.beginPath();
     c.moveTo(x - h * 0.13, shY); c.lineTo(x + h * 0.13, shY);
     c.lineTo(x + h * 0.22, hipY + h * 0.07); c.lineTo(x - h * 0.22, hipY + h * 0.07); c.closePath(); c.fill();
   } else {
-    c.beginPath(); c.roundRect(x - h * 0.15, shY, h * 0.30, hipY - shY + h * 0.05, h * 0.06); c.fill();
+    c.beginPath(); c.roundRect(x - bodyW / 2, shY, bodyW, bodyBottom - shY, h * 0.06); c.fill();
+    if (o.top === 'stripe') {
+      c.save(); c.beginPath(); c.roundRect(x - bodyW / 2, shY, bodyW, bodyBottom - shY, h * 0.06); c.clip();
+      c.fillStyle = o.topColor === '#ffffff' ? '#1f2937' : 'rgba(255,255,255,.85)';
+      for (let yy = shY + h * 0.05; yy < bodyBottom; yy += h * 0.07) c.fillRect(x - bodyW / 2, yy, bodyW, h * 0.025);
+      c.restore();
+    } else if (o.top === 'suit') {
+      c.fillStyle = '#ffffff';
+      c.beginPath(); c.moveTo(x - h * 0.07, shY); c.lineTo(x + h * 0.07, shY); c.lineTo(x, shY + h * 0.14); c.closePath(); c.fill();
+      c.fillStyle = '#dc2626';
+      c.beginPath(); c.moveTo(x - h * 0.018, shY + h * 0.02); c.lineTo(x + h * 0.018, shY + h * 0.02);
+      c.lineTo(x + h * 0.03, shY + h * 0.15); c.lineTo(x, shY + h * 0.18); c.lineTo(x - h * 0.03, shY + h * 0.15); c.closePath(); c.fill();
+    } else if (o.top === 'hoodie') {
+      c.fillStyle = shade(o.topColor, -0.2);
+      c.beginPath(); c.roundRect(x - h * 0.09, hipY - h * 0.08, h * 0.18, h * 0.08, h * 0.02); c.fill();
+      c.strokeStyle = '#fff'; c.lineWidth = h * 0.008;
+      for (const s of [-1, 1]) { c.beginPath(); c.moveTo(x + s * h * 0.03, shY + h * 0.01); c.lineTo(x + s * h * 0.035, shY + h * 0.1); c.stroke(); }
+    }
   }
   // 手臂（被打中時舉手）
-  c.strokeStyle = shirt; c.lineWidth = h * 0.06;
+  c.lineWidth = h * 0.06;
   for (const s of [-1, 1]) {
     const sx = x + s * h * 0.14, sy = shY + h * 0.04;
     const hx = hitT > 0 ? sx + s * h * 0.12 : sx + s * h * 0.06 - s * sw * h * 0.06;
     const hy = hitT > 0 ? sy - h * 0.16 : sy + h * 0.24;
+    c.strokeStyle = o.topColor;
     c.beginPath(); c.moveTo(sx, sy); c.lineTo(hx, hy); c.stroke();
     c.fillStyle = skin; c.beginPath(); c.arc(hx, hy, h * 0.035, 0, Math.PI * 2); c.fill();
   }
   // 長髮在頭後
   if (female) { c.fillStyle = hair; c.beginPath(); c.ellipse(x, headY + r * 0.4, r * 1.15, r * 1.3, 0, 0, Math.PI * 2); c.fill(); }
   // 頭
+  const ex = r * 0.38, ey = headY + r * 0.05;
   if (faceImg) {
     c.save(); c.beginPath(); c.arc(x, headY, r, 0, Math.PI * 2); c.clip();
     c.drawImage(faceImg, x - r, headY - r, r * 2, r * 2);
@@ -826,20 +939,66 @@ function drawHero(c, hero, opt = {}) {
     c.fillStyle = hair; c.beginPath(); c.arc(x, headY - r * 0.1, r * 1.04, Math.PI * 1.05, Math.PI * 1.95); c.fill();
     if (female) { c.beginPath(); c.ellipse(x - r * 0.3, headY - r * 0.55, r * 0.55, r * 0.3, -0.3, 0, Math.PI * 2); c.fill(); }
     c.fillStyle = '#222'; c.strokeStyle = '#222'; c.lineWidth = r * 0.12;
-    const ex = r * 0.38, ey = headY + r * 0.05;
     if (hitT > 0) {
       for (const s of [-1, 1]) { const cx = x + s * ex; c.beginPath(); c.moveTo(cx - r * .13, ey - r * .13); c.lineTo(cx + r * .13, ey + r * .13); c.moveTo(cx + r * .13, ey - r * .13); c.lineTo(cx - r * .13, ey + r * .13); c.stroke(); }
       c.beginPath(); c.arc(x, headY + r * 0.5, r * 0.16, 0, Math.PI * 2); c.fill();
     } else {
-      for (const s of [-1, 1]) { c.beginPath(); c.arc(x + s * ex + hero.dir * r * 0.06, ey, r * 0.1, 0, Math.PI * 2); c.fill(); }
+      for (const s of [-1, 1]) { c.beginPath(); c.arc(x + s * ex + dir * r * 0.06, ey, r * 0.1, 0, Math.PI * 2); c.fill(); }
       c.beginPath(); c.arc(x, headY + r * 0.35, r * 0.3, 0.15 * Math.PI, 0.85 * Math.PI); c.stroke();
     }
     if (female) { c.fillStyle = 'rgba(255,120,150,.45)'; for (const s of [-1, 1]) { c.beginPath(); c.arc(x + s * r * 0.6, headY + r * 0.3, r * 0.14, 0, Math.PI * 2); c.fill(); } }
   }
+  // 眼鏡
+  if (o.glasses === 'sun') {
+    c.fillStyle = 'rgba(15,15,20,.92)';
+    for (const s of [-1, 1]) { c.beginPath(); c.roundRect(x + s * ex - r * 0.24, ey - r * 0.14, r * 0.48, r * 0.3, r * 0.1); c.fill(); }
+    c.strokeStyle = '#111'; c.lineWidth = r * 0.07; c.beginPath(); c.moveTo(x - ex + r * 0.24, ey - r * 0.04); c.lineTo(x + ex - r * 0.24, ey - r * 0.04); c.stroke();
+  } else if (o.glasses === 'round') {
+    c.strokeStyle = '#3b2a1a'; c.lineWidth = r * 0.07;
+    for (const s of [-1, 1]) { c.beginPath(); c.arc(x + s * ex, ey, r * 0.21, 0, Math.PI * 2); c.stroke(); }
+    c.beginPath(); c.moveTo(x - ex + r * 0.21, ey); c.lineTo(x + ex - r * 0.21, ey); c.stroke();
+  }
+  // 頭飾
+  const top = headY - r;
+  let hatH = 0;
+  if (o.hat === 'cap') {
+    c.fillStyle = '#ef4444';
+    c.beginPath(); c.arc(x, headY - r * 0.25, r * 0.95, Math.PI, 0); c.fill();
+    c.beginPath(); c.ellipse(x + dir * r * 0.75, headY - r * 0.28, r * 0.6, r * 0.13, 0, 0, Math.PI * 2); c.fill();
+    c.fillStyle = '#fff'; c.beginPath(); c.arc(x, top - r * 0.2, r * 0.1, 0, Math.PI * 2); c.fill();
+    hatH = r * 0.3;
+  } else if (o.hat === 'crown') {
+    c.fillStyle = '#facc15'; c.strokeStyle = '#a16207'; c.lineWidth = r * 0.05;
+    const w = r * 0.8, b = top + r * 0.2, t = top - r * 0.45;
+    c.beginPath(); c.moveTo(x - w, b); c.lineTo(x - w, t + r * 0.15); c.lineTo(x - w / 2, b - r * 0.25); c.lineTo(x, t);
+    c.lineTo(x + w / 2, b - r * 0.25); c.lineTo(x + w, t + r * 0.15); c.lineTo(x + w, b); c.closePath(); c.fill(); c.stroke();
+    c.fillStyle = '#ef4444'; c.beginPath(); c.arc(x, b - r * 0.12, r * 0.09, 0, Math.PI * 2); c.fill();
+    hatH = r * 0.45;
+  } else if (o.hat === 'party') {
+    const b = top + r * 0.25, t = top - r * 1.0, w = r * 0.5;
+    c.save(); c.beginPath(); c.moveTo(x - w, b); c.lineTo(x, t); c.lineTo(x + w, b); c.closePath(); c.clip();
+    for (let i = 0; i < 6; i++) { c.fillStyle = i % 2 ? '#3b82f6' : '#facc15'; c.fillRect(x - w, t + (b - t) * i / 6, w * 2, (b - t) / 6 + 1); }
+    c.restore();
+    c.fillStyle = '#ec4899'; c.beginPath(); c.arc(x, t, r * 0.14, 0, Math.PI * 2); c.fill();
+    hatH = r * 1.1;
+  } else if (o.hat === 'bow') {
+    const bx = x + r * 0.55, by = top + r * 0.15, s = r * 0.32;
+    c.fillStyle = '#ec4899';
+    c.beginPath(); c.moveTo(bx, by); c.lineTo(bx - s, by - s * 0.7); c.lineTo(bx - s, by + s * 0.7); c.closePath(); c.fill();
+    c.beginPath(); c.moveTo(bx, by); c.lineTo(bx + s, by - s * 0.7); c.lineTo(bx + s, by + s * 0.7); c.closePath(); c.fill();
+    c.fillStyle = '#be185d'; c.beginPath(); c.arc(bx, by, s * 0.3, 0, Math.PI * 2); c.fill();
+    hatH = r * 0.1;
+  } else if (o.hat === 'helmet') {
+    c.fillStyle = '#facc15';
+    c.beginPath(); c.arc(x, headY - r * 0.2, r * 1.0, Math.PI, 0); c.fill();
+    c.fillRect(x - r * 1.25, headY - r * 0.28, r * 2.5, r * 0.14);
+    c.fillStyle = '#eab308'; c.fillRect(x - r * 0.1, top - r * 0.2, r * 0.2, r * 0.75);
+    hatH = r * 0.25;
+  }
   if (hitT > 0) { c.font = `${r * 0.8}px sans-serif`; c.textAlign = 'center'; c.fillText('💢', x + r * 1.1, headY - r * 0.7); }
-  // 名字＋血條
+  // 名字＋血條（有頭飾時往上讓位）
   if (!opt.preview && hero.maxHp) {
-    const bw = Math.max(70, h * 0.6), by = headY - r - 16;
+    const bw = Math.max(70, h * 0.6), by = headY - r - 16 - hatH;
     c.fillStyle = 'rgba(0,0,0,.55)'; c.fillRect(x - bw / 2, by, bw, 8);
     c.fillStyle = hero.hp / hero.maxHp > 0.35 ? '#ff5d5d' : '#ffb03b';
     c.fillRect(x - bw / 2 + 1, by + 1, (bw - 2) * Math.max(0, hero.hp / hero.maxHp), 6);
@@ -1103,6 +1262,69 @@ $('face-clear').addEventListener('click', () => {
   faceImg = null; CROP.img = null; $('face-msg').textContent = '已改回卡通臉'; drawPreview();
 });
 
+/* ---------- 換裝衣櫃 ---------- */
+const WARD = { draft: null, raf: 0, t: 0 };
+function wardDraw() {
+  const cv = $('ward-preview'), c = cv.getContext('2d');
+  c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, cv.width, cv.height);
+  WARD.t += 0.05;
+  drawHero(c, { x: cv.width / 2, y: cv.height - 24, dir: 1, walk: WARD.t * 3, hitT: 0 }, { h: 250, preview: true, outfit: WARD.draft });
+  WARD.raf = requestAnimationFrame(wardDraw);
+}
+function wardRender() {
+  const box = $('ward-opts'), d = WARD.draft;
+  box.innerHTML = '';
+  const row = (label) => { const r = document.createElement('div'); r.className = 'ward-row'; r.innerHTML = `<div class="lbl">${label}</div><div class="chips"></div>`; box.appendChild(r); return r.querySelector('.chips'); };
+  const presets = row('快速套裝');
+  OUTFIT_PRESETS.forEach(([name, o]) => {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'chip'; b.textContent = name;
+    b.onclick = () => { Object.assign(WARD.draft, o); wardRender(); };
+    presets.appendChild(b);
+  });
+  for (const slot of WARDROBE) {
+    const chips = row(slot.label);
+    if (slot.opts) {
+      for (const [v, t] of slot.opts) {
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'chip' + (d[slot.key] === v ? ' on' : ''); b.textContent = t;
+        b.onclick = () => { d[slot.key] = v; wardRender(); };
+        chips.appendChild(b);
+      }
+    } else {
+      const list = (slot.none ? ['none'] : []).concat(slot.palette);
+      for (const col of list) {
+        const b = document.createElement('button'); b.type = 'button';
+        b.className = 'sw' + (col === 'none' ? ' none' : '') + (d[slot.key] === col ? ' on' : '');
+        if (col !== 'none') b.style.background = col;
+        b.title = col === 'none' ? '無' : col; b.setAttribute('aria-label', slot.label + ' ' + (col === 'none' ? '無' : col));
+        b.onclick = () => { d[slot.key] = col; wardRender(); };
+        chips.appendChild(b);
+      }
+    }
+  }
+}
+function openWardrobe() {
+  WARD.draft = curOutfit();
+  wardRender();
+  $('wardrobe-modal').classList.remove('hidden');
+  cancelAnimationFrame(WARD.raf); wardDraw();
+}
+function closeWardrobe() { $('wardrobe-modal').classList.add('hidden'); cancelAnimationFrame(WARD.raf); }
+$('ward-btn').addEventListener('click', openWardrobe);
+$('ward-cancel').addEventListener('click', closeWardrobe);
+$('ward-reset').addEventListener('click', () => { WARD.draft = Object.assign({}, OUTFIT_DEFAULT[SET.gender]); wardRender(); });
+$('ward-random').addEventListener('click', () => {
+  const pick = a => a[Math.floor(Math.random() * a.length)];
+  for (const s of WARDROBE) {
+    if (s.key === 'hair') continue;
+    WARD.draft[s.key] = s.opts ? pick(s.opts)[0] : (s.none && Math.random() < 0.6 ? 'none' : pick(s.palette));
+  }
+  wardRender();
+});
+$('ward-ok').addEventListener('click', () => {
+  SET.outfits = Object.assign({}, SET.outfits || {}, { [SET.gender]: Object.assign({}, WARD.draft) });
+  saveSet(); closeWardrobe(); drawPreview();
+});
+
 /* ---------- 結算與排行榜 ---------- */
 const LB_KEY = 'btc-leaderboard';
 function loadLB() { try { return JSON.parse(localStorage.getItem(LB_KEY) || '[]'); } catch (e) { return []; } }
@@ -1255,7 +1477,7 @@ G._test = {
   throwBall, aimedThrow, detectThrow, effThresholds, headInfo, rowsLeft,
   setHeroRow: r => { G.hero.row = r; G.hero.y = heroTargetY(); },
   forceEdge: () => { G.hero.dashT = 0; G.hero.pauseT = 0; G.hero.dir = 1; G.hero.x = W - heroMargin() - 0.5; },
-  set: SET, release: handleReleaseForTest, throwFromGesture, crop: CROP, cropApply, cropSetZoom,
+  set: SET, curOutfit, ward: WARD, drawHero, release: handleReleaseForTest, throwFromGesture, crop: CROP, cropApply, cropSetZoom,
 };
 
 bindPointer();
