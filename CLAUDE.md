@@ -1,6 +1,6 @@
 # ball-throw-cam — 體感丟球大作戰
 
-單檔靜態網頁遊戲（`index.html`＋`manual.html`＋PWA 檔），無建置步驟。跟 `fruit-ninja-cam`／`boxing-cam` 同一套攝影機骨架（`initCamera`／`refreshCamPicker`／`pickPreferredCam`／`lmToScreen`／滑鼠降級／跑馬燈／PWA 安裝段落都是複製來的），差異在玩法。port 8847。2026-11-01 建立，**尚未建 GitHub repo、未上 Pages**（上線前先問使用者）。
+單檔靜態網頁遊戲（`index.html`＋`manual.html`＋PWA 檔），無建置步驟。跟 `fruit-ninja-cam`／`boxing-cam` 同一套攝影機骨架（`initCamera`／`refreshCamPicker`／`pickPreferredCam`／`lmToScreen`／滑鼠降級／跑馬燈／PWA 安裝段落都是複製來的），差異在玩法。port 8847。2026-11-01 建立並上線（使用者要求）：公開 repo <https://github.com/M255525/ball-throw-cam>，GitHub Pages（Actions workflow，push 到 master 自動部署）<https://m255525.github.io/ball-throw-cam/>。visitor-badge `m255525.ballthrowcam`。
 
 ## 玩法
 - 角色（男／女，可上傳長相照片當圓形大頭）在上方左右走，碰到左右邊界 → 反向＋`row+1`（降一格）。腳底越過防線（`LINE_RATIO=0.80`×H）→ 丟球的人輸。
