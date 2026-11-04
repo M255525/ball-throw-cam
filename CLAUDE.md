@@ -25,6 +25,9 @@
 ## 角色畫風（2026-11-02 使用者要求美化）
 貼紙風 Q 版：所有形狀加深色描邊 `HERO_OL`（`fillOL`／`limb` 先粗深色再細彩色）、衣服左亮右暗漸層（`grad`）、手腳兩段有手肘膝蓋、左右腳前後交替＋手反向擺＋走路上下彈跳（`bob`，只 1% 身高，不影響命中）、大眼高光＋眉毛＋鼻子＋張嘴笑＋腮紅、約 3.6 秒眨眼一次（用 `performance.now()`，預覽畫面也會動）；受擊＝XX 眼＋O 嘴＋汗滴＋舉手亂揮。男生刺蝟瀏海＋翹毛＋耳朵；女生長髮畫在身體後面垂到肩下，前面側分瀏海＋兩側髮束（舊版整圈頭髮繞到下巴像鬍子，已改掉）。**頭的圓心與半徑公式不能動**——要跟 `headInfo()` 一致，命中判定靠它。
 
+## 音效（2026-11-04 使用者要求命中要有聲音、可關閉）
+全部 WebAudio 合成無音檔。`sfx.hit(head)`＝低頻碰＋高頻啪＋下滑音，打到頭多兩聲叮。開關只有一個 `SET.sound`（管全部音效），`.sound-toggle` 按鈕在開始畫面與遊戲中（`#hud-sound`，結束鈕左邊），與常用設定勾選框同步，`setSound()`／`renderSound()`。體感模式的命中不在使用者點擊事件裡，所以開始／再玩一次按鈕要先 `unlockAudio()`，`audio()` 也會自動 resume。
+
 ## 儲存（localStorage，全部 try/catch）
 `btc-settings`（gender/name/sens/ballSpeed/startLevel/sound/assist/debug/outfits）、`btc-face`（256px JPEG dataURL，照片只在本機）、`btc-face-src`、`btc-face-crop`、`btc-best`、`btc-leaderboard`、`btc-cam`、`btc-warned`（首訪警語）、`btcMarquee`。
 
