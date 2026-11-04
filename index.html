@@ -75,6 +75,9 @@
   #quit-btn { position: absolute; bottom: 12px; right: 12px; pointer-events: auto; font-family: inherit;
     font-size: 13px; color: #fff; background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.25);
     border-radius: 999px; padding: 5px 12px; cursor: pointer; }
+  #hud-item { position: absolute; bottom: 12px; right: 86px; pointer-events: auto; font-family: inherit;
+    font-size: 13px; color: #fff; background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.25);
+    border-radius: 999px; padding: 5px 12px; cursor: pointer; }
   @media (max-width: 700px) {
     #level-num { top: 58px; font-size: 16px; }
     #score { font-size: 30px; }
@@ -101,6 +104,12 @@
     background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.25); }
   .seg button.on { background: linear-gradient(135deg, #ff7a2f, #e8452c); border-color: transparent; font-weight: 700; }
   .small-note { font-size: 12px; opacity: .7; text-align: left; line-height: 1.6; }
+  .item-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); gap: 6px; }
+  .item-grid button { font-family: inherit; font-size: 14px; color: #fff; padding: 6px 2px; border-radius: 10px; cursor: pointer;
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.25); display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .item-grid button.on { background: linear-gradient(135deg, #ff7a2f, #e8452c); border-color: transparent; font-weight: 700; }
+  .item-grid canvas { width: 44px; height: 44px; }
+  .item-grid .dice { font-size: 30px; line-height: 44px; height: 44px; }
   .btn {
     font-family: inherit; font-size: 21px; font-weight: 700; color: #fff;
     background: linear-gradient(135deg, #ff7a2f, #e8452c); border: none; border-radius: 999px;
@@ -183,6 +192,7 @@
     <div class="hud-right"><div id="rows-left"></div><div id="balls"></div></div>
     <div id="level-banner"></div>
     <div id="mode-badge"></div>
+    <button id="hud-item" type="button" title="切換要丟的物件"></button>
     <button id="quit-btn" type="button">✕ 結束</button>
   </div>
 
@@ -191,7 +201,7 @@
       <div class="title">🏐 體感丟球大作戰</div>
       <div class="subtitle">
         角色會在上方<b>左右來回走</b>，走到邊緣就<b>往下降一格</b>。<br>
-        對著鏡頭把手<b>由下往上快速甩</b>就能丟球，打中就把他往上推回半格！<br>
+        對著鏡頭把手<b>由下往上快速甩</b>就能丟東西，打中就把他往上推回去！<br>
         把他的 ❤ 血量打光就過關，共 <b>3 關</b>；讓他越過紅色<b>防線</b>，你就輸了。
       </div>
 
@@ -212,6 +222,15 @@
           <input type="file" id="face-input" accept="image/*" hidden>
           <div class="small-note">照片只在你的瀏覽器裡裁成圓形大頭，不會上傳到任何伺服器。請只使用你本人或已取得同意者的照片。</div>
           <div id="face-msg" class="small-note" style="color:#ffd27a"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="ctrl">
+          <div class="card-title">🎒 要丟什麼</div>
+          <div class="item-grid" id="item-grid"></div>
+          <div id="item-tip" class="small-note" style="color:#ffd27a;opacity:1"></div>
+          <div class="small-note">這些都只是遊戲裡的卡通物件，現實中請勿向人丟擲任何物品。</div>
         </div>
       </div>
 
@@ -331,7 +350,23 @@ const LEVELS = [
   { name: '第 2 關', hp: 12, speed: 0.23, rowStep: 0.085, dodge: 0.15, tricky: false },
   { name: '第 3 關', hp: 16, speed: 0.30, rowStep: 0.095, dodge: 0.28, tricky: true  },
 ];
-const MAX_BALLS = 3;            // 同時在飛的球數上限
+/* 可丟物件：size 大小、speed 飛行速度、grav 重力、spin 旋轉，都是相對球的倍率；
+ * dmg 扣血、push 推回格數、bonus 額外得分、max 同時在飛上限、slow 命中後角色變慢秒數 */
+const ITEMS = {
+  ball:    { name: '球',     tip: '標準手感，最好控制。',                 size: 1,    speed: 1,    grav: 1,    spin: 8,  dmg: 1, push: 0.5,  bonus: 0,  max: 3, color: '#ffd27a', dot: '#ff7a2f',
+             snd: () => sfx.hit() },
+  glass:   { name: '玻璃杯', tip: '又小又快，比較難中，命中多 10 分。',   size: 0.8,  speed: 1.15, grav: 0.95, spin: 10, dmg: 1, push: 0.5,  bonus: 10, max: 3, color: '#bfe9ff', dot: '#8fd6ff',
+             snd: () => { noise(5200, 2600, 0.22, 0.4); [2093, 2637, 3136].forEach((f, i) => tone('triangle', f, f * 0.97, 0.12, 0.13, i * 0.05)); } },
+  chair:   { name: '椅子',   tip: '又大又重：扣 2 血、推回 1 格，但一次只能丟 1 張。', size: 2.1, speed: 0.8, grav: 1.25, spin: 5, dmg: 2, push: 1, bonus: 5, max: 1, color: '#b9783f', dot: '#a0622d',
+             snd: () => { tone('sine', 150, 45, 0.28, 0.7); noise(900, 300, 0.14, 0.45); } },
+  pillow:  { name: '枕頭',   tip: '又大又飄，最容易打中，可同時丟 2 個。', size: 1.7,  speed: 0.85, grav: 0.6,  spin: 4,  dmg: 1, push: 0.5,  bonus: 0,  max: 2, color: '#ffffff', dot: '#e6ecf8',
+             snd: () => noise(700, 250, 0.2, 0.5) },
+  slipper: { name: '拖鞋',   tip: '轉著飛又快，可連丟 4 隻，但只推回 ¼ 格。', size: 0.95, speed: 1.25, grav: 0.9, spin: 18, dmg: 1, push: 0.25, bonus: 0, max: 4, color: '#4f8ef7', dot: '#4f8ef7',
+             snd: () => { noise(3200, 1400, 0.06, 0.6); tone('square', 300, 200, 0.05, 0.15); } },
+  pie:     { name: '奶油派', tip: '命中糊他一臉，角色 2.5 秒內走路變慢。', size: 1.2,  speed: 0.95, grav: 1,    spin: 3,  dmg: 1, push: 0.5,  bonus: 0,  max: 2, slow: 2.5, color: '#fff3dc', dot: '#f4d9a8',
+             snd: () => { noise(600, 180, 0.18, 0.6); tone('sine', 260, 90, 0.16, 0.35); } },
+};
+const ITEM_KEYS = Object.keys(ITEMS);
 const THROW_COOLDOWN_MS = 350;
 const LINE_RATIO = 0.80;        // 防線位置（畫面高比例）
 const GRAVITY_RATIO = 1.0;      // 重力（畫面高/秒²）
@@ -352,7 +387,7 @@ const HAND_CONN = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],
 
 /* ---------- 設定（localStorage，讀寫都包 try/catch） ---------- */
 const SET_KEY = 'btc-settings';
-const SET = Object.assign({ gender: 'male', name: '', sens: 3, ballSpeed: 'normal', startLevel: 1, sound: true, assist: 'low', debug: false },
+const SET = Object.assign({ gender: 'male', name: '', sens: 3, ballSpeed: 'normal', startLevel: 1, sound: true, assist: 'low', debug: false, item: 'ball' },
   (() => { try { return JSON.parse(localStorage.getItem(SET_KEY) || '{}'); } catch (e) { return {}; } })());
 function saveSet() { try { localStorage.setItem(SET_KEY, JSON.stringify(SET)); } catch (e) {} }
 function lsGet(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } }
@@ -452,8 +487,9 @@ function renderHUD() {
     el.textContent = '距防線 ' + (Math.round(left * 2) / 2) + ' 格';
     el.classList.toggle('danger', left <= 1.01);
   }
-  const flying = G.balls.length;
-  $('balls').innerHTML = Array.from({ length: MAX_BALLS }, (_, i) => `<span class="${i < flying ? 'used' : ''}">🟠</span>`).join('');
+  const flying = G.balls.length, it = curItem();
+  $('balls').innerHTML = Array.from({ length: it.max }, (_, i) => `<span class="${i < flying ? 'used' : ''}" style="color:${it.dot}">●</span>`).join('');
+  $('hud-item').textContent = '🔁 ' + (SET.item === 'random' ? '隨機：' : '') + it.name;
 }
 function showBanner(text) {
   G.bannerTime = 2.0;
@@ -570,11 +606,12 @@ function ballSpeedPx() { return H * 1.7 * (SPEED_FACTOR[SET.ballSpeed] || 1); }
 
 /* 依甩動方向發射 */
 function throwFromGesture(g) {
-  const sp = Math.min(Math.max(g.speed * 1.1, H * 1.25), H * 2.3) * (SPEED_FACTOR[SET.ballSpeed] || 1);
+  const it = curItem();
+  const sp = Math.min(Math.max(g.speed * 1.1, H * 1.25), H * 2.3) * (SPEED_FACTOR[SET.ballSpeed] || 1) * it.speed;
   let vx = g.dirx * sp, vy = g.diry * sp;
   const a = ASSIST[SET.assist] ?? ASSIST.low;
   if (a > 0 && G.hero) {             // 瞄準輔助：跟「正好打中頭」的初速做加權
-    const hi = headInfo(G.hero), grav = H * GRAVITY_RATIO;
+    const hi = headInfo(G.hero), grav = H * GRAVITY_RATIO * it.grav;
     const dx = hi.hx - g.x, dy = hi.hy - g.y, t = Math.max(0.15, Math.hypot(dx, dy) / sp);
     vx = vx * (1 - a) + (dx / t) * a;
     vy = vy * (1 - a) + (dy / t - 0.5 * grav * t) * a;
@@ -592,14 +629,21 @@ function upSpeed(hist) {
 /* 瞄準角色頭部發射（含重力補償）：握拳→張開、滑鼠點一下用 */
 function aimedThrow(x, y, tx, ty) {
   if (!G.hero) return false;
-  const sp = ballSpeedPx(), g = H * GRAVITY_RATIO;
+  const it = curItem(), sp = ballSpeedPx() * it.speed, g = H * GRAVITY_RATIO * it.grav;
   const dx = tx - x, dy = ty - y, t = Math.max(0.15, Math.hypot(dx, dy) / sp);
   return throwBall(x, y, dx / t, dy / t - 0.5 * g * t);
 }
+/* 下一個要丟的物件：選「隨機」時每丟一次重抽 */
+function pickNext() {
+  G.nextItem = SET.item === 'random' ? ITEM_KEYS[Math.floor(Math.random() * ITEM_KEYS.length)] : (ITEMS[SET.item] ? SET.item : 'ball');
+}
+function curItem() { if (!G.nextItem) pickNext(); return ITEMS[G.nextItem]; }
 function throwBall(x, y, vx, vy) {
-  if (G.state !== 'playing' || G.balls.length >= MAX_BALLS) return false;
-  G.balls.push({ x, y, vx, vy, r: Math.max(14, Math.min(W, H) * 0.028), rot: 0 });
+  const it = curItem();
+  if (G.state !== 'playing' || G.balls.length >= it.max) return false;
+  G.balls.push({ x, y, vx, vy, item: G.nextItem, r: Math.max(14, Math.min(W, H) * 0.028) * it.size, rot: 0, grav: it.grav, spin: it.spin });
   G.throws++;
+  if (SET.item === 'random') pickNext();
   sfx.throw();
   const L = LEVELS[G.level];
   if (L.dodge && G.hero && G.bannerTime <= 0 && Math.random() < L.dodge) G.hero.dashT = 0.4;   // 偶爾閃避
@@ -702,7 +746,7 @@ function setupLevel(l) {
   G.level = l;
   const startLeft = Math.random() < 0.5;
   G.hero = { x: startLeft ? heroMargin() : W - heroMargin(), dir: startLeft ? 1 : -1, row: 0, y: 0,
-    hp: LEVELS[l].hp, maxHp: LEVELS[l].hp, walk: 0, hitT: 0, dashT: 0, pauseT: 0 };
+    hp: LEVELS[l].hp, maxHp: LEVELS[l].hp, walk: 0, hitT: 0, dashT: 0, pauseT: 0, slowT: 0 };
   G.hero.y = heroTargetY();
   G.balls = [];
   showBanner(LEVELS[l].name);
@@ -733,13 +777,15 @@ function addFloater(x, y, text, color) { G.floaters.push({ x, y, text, color, li
 function onHit(ball, head) {
   const h = G.hero;
   G.combo++; G.hits++;
-  const pts = 10 + Math.min(25, (G.combo - 1) * 5) + (head ? 5 : 0);
+  const it = ITEMS[ball.item] || ITEMS.ball;
+  const pts = 10 + Math.min(25, (G.combo - 1) * 5) + (head ? 5 : 0) + it.bonus;
   G.score += pts;
-  h.hp--; h.hitT = 0.5;
-  h.row = Math.max(0, h.row - 0.5);           // 打回去半格
-  burst(ball.x, ball.y, '#ffd27a', 18, 260);
+  h.hp = Math.max(0, h.hp - it.dmg); h.hitT = 0.5;
+  h.row = Math.max(0, h.row - it.push);       // 依物件打回去
+  if (it.slow) h.slowT = it.slow;
+  burst(ball.x, ball.y, it.color, 18, 260);
   addFloater(ball.x, ball.y - 20, (head ? '正中！' : '') + '+' + pts + (G.combo > 1 ? ` ×${G.combo}` : ''), head ? '#ff9f43' : '#fff');
-  sfx.hit();
+  it.snd();
   if (h.hp <= 0) levelClear();
   renderHUD();
 }
@@ -762,12 +808,13 @@ function update(dt) {
   const h = G.hero, L = LEVELS[G.level];
   G.bannerTime -= dt;
   h.hitT = Math.max(0, h.hitT - dt);
+  h.slowT = Math.max(0, h.slowT - dt);
 
   // 球
   const grav = H * GRAVITY_RATIO;
   const hi = headInfo(h);
   for (const b of G.balls) {
-    b.vy += grav * dt; b.x += b.vx * dt; b.y += b.vy * dt; b.rot += dt * 8;
+    b.vy += grav * b.grav * dt; b.x += b.vx * dt; b.y += b.vy * dt; b.rot += dt * b.spin;
     if (b.dead) continue;
     const dh = Math.hypot(b.x - hi.hx, b.y - hi.hy), db = Math.hypot(b.x - hi.hx, b.y - hi.bodyY);
     if (dh < hi.r + b.r) { b.dead = 'hit'; onHit(b, true); }
@@ -789,6 +836,7 @@ function update(dt) {
     let sp = Math.max(W * L.speed, 120);
     if (L.tricky) sp *= 1 + 0.3 * Math.sin(G.time * 1.7);
     if (h.dashT > 0) sp *= 2.8;
+    if (h.slowT > 0) sp *= 0.5;                // 奶油派糊臉
     if (h.pauseT > 0 || h.hitT > 0.3) sp = 0;
     h.x += h.dir * sp * dt;
     if (sp > 0) h.walk += dt * 11;
@@ -1146,18 +1194,84 @@ function drawHero(c, hero, opt = {}) {
   }
   c.restore();
 }
-function drawBall(b) {
-  ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.rot);
-  ctx.fillStyle = '#ff7a2f'; ctx.beginPath(); ctx.arc(0, 0, b.r, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = '#fff3e6'; ctx.lineWidth = b.r * 0.14;
-  ctx.beginPath(); ctx.arc(0, -b.r * 1.1, b.r * 1.1, 0.25 * Math.PI, 0.75 * Math.PI); ctx.stroke();
-  ctx.beginPath(); ctx.arc(0, b.r * 1.1, b.r * 1.1, 1.25 * Math.PI, 1.75 * Math.PI); ctx.stroke();
-  ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.beginPath(); ctx.arc(-b.r * .35, -b.r * .35, b.r * .28, 0, Math.PI * 2); ctx.fill();
-  ctx.restore();
+/* 物件全部程式繪製，用單位座標（r=1）畫，方便任何大小共用 */
+function itemPath(c, pts) { c.beginPath(); pts.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y))); c.closePath(); }
+const ITEM_DRAW = {
+  ball(c) {
+    c.fillStyle = '#ff7a2f'; c.beginPath(); c.arc(0, 0, 1, 0, Math.PI * 2); c.fill();
+    c.strokeStyle = '#fff3e6'; c.lineWidth = 0.14;
+    c.beginPath(); c.arc(0, -1.1, 1.1, 0.25 * Math.PI, 0.75 * Math.PI); c.stroke();
+    c.beginPath(); c.arc(0, 1.1, 1.1, 1.25 * Math.PI, 1.75 * Math.PI); c.stroke();
+    c.fillStyle = 'rgba(255,255,255,.35)'; c.beginPath(); c.arc(-.35, -.35, .28, 0, Math.PI * 2); c.fill();
+  },
+  glass(c) {
+    const cup = [[-.62, -1], [.62, -1], [.46, 1], [-.46, 1]];
+    itemPath(c, cup); c.fillStyle = 'rgba(205,238,255,.5)'; c.fill();
+    itemPath(c, [[-.55, -.2], [.55, -.2], [.46, .84], [-.46, .84]]); c.fillStyle = 'rgba(90,180,240,.65)'; c.fill();
+    itemPath(c, cup); c.lineJoin = 'round'; c.strokeStyle = 'rgba(20,50,80,.75)'; c.lineWidth = .2; c.stroke();
+    c.strokeStyle = '#f2fbff'; c.lineWidth = .09; c.stroke();
+    c.strokeStyle = 'rgba(255,255,255,.85)'; c.lineWidth = .1; c.beginPath(); c.moveTo(-.36, -.72); c.lineTo(-.26, .6); c.stroke();
+  },
+  chair(c) {
+    const wood = '#a0622d', dark = '#3d2412', lite = '#c98a4e';
+    const bar = (x, y, w, h, col) => { c.fillStyle = col; c.strokeStyle = dark; c.lineWidth = .06; c.beginPath(); c.rect(x, y, w, h); c.fill(); c.stroke(); };
+    bar(-.72, -1, .16, 2, wood); bar(.56, .05, .16, .95, wood); bar(-.1, .05, .14, .8, wood);
+    bar(-.72, -1, .72, .2, lite); bar(-.72, -.55, .72, .14, wood);
+    bar(-.8, -.08, 1.6, .2, lite);
+  },
+  pillow(c) {
+    c.beginPath(); c.moveTo(-1, -.62);
+    c.quadraticCurveTo(0, -.4, 1, -.62); c.quadraticCurveTo(.8, 0, 1, .62);
+    c.quadraticCurveTo(0, .4, -1, .62); c.quadraticCurveTo(-.8, 0, -1, -.62); c.closePath();
+    c.fillStyle = '#fbfcff'; c.fill(); c.lineJoin = 'round'; c.strokeStyle = '#7f8db0'; c.lineWidth = .08; c.stroke();
+    c.strokeStyle = '#ccd6ea'; c.lineWidth = .07;
+    c.beginPath(); c.moveTo(-.68, -.3); c.quadraticCurveTo(-.45, 0, -.68, .3); c.stroke();
+    c.beginPath(); c.moveTo(.68, -.3); c.quadraticCurveTo(.45, 0, .68, .3); c.stroke();
+  },
+  slipper(c) {
+    // 藍白拖俯視：後跟窄、前掌寬的鞋底＋一條藍色寬帶
+    c.beginPath(); c.moveTo(-1.2, 0);
+    c.bezierCurveTo(-1.2, -.42, -.7, -.4, -.25, -.46);
+    c.bezierCurveTo(.3, -.72, 1.2, -.7, 1.2, 0);
+    c.bezierCurveTo(1.2, .7, .3, .72, -.25, .46);
+    c.bezierCurveTo(-.7, .4, -1.2, .42, -1.2, 0); c.closePath();
+    c.fillStyle = '#f7f8fb'; c.fill(); c.lineJoin = 'round'; c.strokeStyle = '#2f6fe0'; c.lineWidth = .13; c.stroke();
+    c.fillStyle = '#2f6fe0'; c.strokeStyle = '#163a80'; c.lineWidth = .05;
+    c.beginPath(); c.moveTo(-.1, -.56); c.quadraticCurveTo(.2, 0, -.1, .56);
+    c.lineTo(.42, .64); c.quadraticCurveTo(.78, 0, .42, -.64); c.closePath(); c.fill(); c.stroke();
+    c.strokeStyle = 'rgba(255,255,255,.55)'; c.lineWidth = .06;
+    c.beginPath(); c.moveTo(.2, -.42); c.quadraticCurveTo(.46, 0, .2, .42); c.stroke();
+  },
+  pie(c) {
+    c.beginPath(); c.moveTo(-1, .05); c.lineTo(-.76, .6); c.lineTo(.76, .6); c.lineTo(1, .05); c.closePath();
+    c.fillStyle = '#c98a4e'; c.fill(); c.lineJoin = 'round'; c.strokeStyle = '#6b4220'; c.lineWidth = .08; c.stroke();
+    c.fillStyle = '#fffaf0';
+    [[-.62, -.02, .4], [.62, -.02, .4], [-.25, -.2, .46], [.25, -.2, .46], [0, -.48, .34]].forEach(([x, y, r]) => { c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill(); });
+    c.fillStyle = '#e0334a'; c.beginPath(); c.arc(0, -.78, .17, 0, Math.PI * 2); c.fill();
+  },
+};
+function drawItem(c, key, x, y, r, rot) {
+  c.save(); c.translate(x, y); c.rotate(rot); c.scale(r, r);
+  (ITEM_DRAW[key] || ITEM_DRAW.ball)(c);
+  c.restore();
 }
+function drawBall(b) { drawItem(ctx, b.item, b.x, b.y, b.r, b.rot); }
 function drawHeldBall(x, y) {
-  if (G.state !== 'playing' || G.balls.length >= MAX_BALLS) return;
-  ctx.globalAlpha = 0.85; drawBall({ x, y: y - 26, r: Math.max(12, Math.min(W, H) * 0.022), rot: 0 }); ctx.globalAlpha = 1;
+  const it = curItem();
+  if (G.state !== 'playing' || G.balls.length >= it.max) return;
+  const r = Math.max(12, Math.min(W, H) * 0.022) * Math.min(it.size, 1.5);
+  ctx.globalAlpha = 0.85; drawItem(ctx, G.nextItem, x, y - 26 - r * 0.4, r, 0); ctx.globalAlpha = 1;
+}
+/* 奶油派命中後糊在臉上，畫在角色上層，不改動 drawHero */
+function drawCream(h) {
+  if (!(h.slowT > 0)) return;
+  const hi = headInfo(h), r = hi.r;
+  ctx.save(); ctx.globalAlpha = Math.min(1, h.slowT / 0.5); ctx.fillStyle = '#fffaf0';
+  [[0, .1, .62], [-.42, -.12, .36], [.42, -.1, .38], [-.3, .5, .28], [.34, .5, .26]].forEach(([x, y, q]) => {
+    ctx.beginPath(); ctx.arc(hi.hx + x * r, hi.hy + y * r, q * r, 0, Math.PI * 2); ctx.fill();
+  });
+  ctx.fillStyle = '#e0334a'; ctx.beginPath(); ctx.arc(hi.hx + r * .1, hi.hy - r * .2, r * .13, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
 }
 function drawHands() {
   for (const hs of G.hands.values()) {
@@ -1247,6 +1361,7 @@ function draw() {
   ctx.restore();
 
   drawHero(ctx, G.hero);
+  drawCream(G.hero);
   for (const b of G.balls) drawBall(b);
   for (const p of G.particles) { ctx.globalAlpha = Math.max(0, p.life); ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill(); }
   ctx.globalAlpha = 1;
@@ -1285,6 +1400,33 @@ function drawPreview() {
 document.querySelectorAll('#gender-seg button').forEach(b => b.addEventListener('click', () => {
   SET.gender = b.dataset.g; saveSet(); drawPreview();
 }));
+/* ---------- 開始畫面：要丟什麼 ---------- */
+function setItem(k) {
+  SET.item = k; saveSet(); pickNext(); renderItems();
+  if (G.state === 'playing') renderHUD();
+}
+function renderItems() {
+  document.querySelectorAll('#item-grid button').forEach(b => b.classList.toggle('on', b.dataset.k === SET.item));
+  $('item-tip').textContent = SET.item === 'random' ? '每丟一次隨機換一種，體感模式不用碰滑鼠也能全部玩到。' : curItem().tip;
+}
+function buildItemGrid() {
+  const grid = $('item-grid');
+  ITEM_KEYS.forEach(k => {
+    const b = document.createElement('button'); b.type = 'button'; b.dataset.k = k;
+    const cv = document.createElement('canvas'); cv.width = cv.height = 88;
+    drawItem(cv.getContext('2d'), k, 44, 44, k === 'slipper' ? 30 : 36, k === 'slipper' ? -0.5 : 0);
+    b.append(cv, ITEMS[k].name); grid.append(b);
+  });
+  const rb = document.createElement('button'); rb.type = 'button'; rb.dataset.k = 'random';
+  rb.innerHTML = '<span class="dice">🎲</span>隨機'; grid.append(rb);
+  grid.querySelectorAll('button').forEach(b => b.addEventListener('click', () => setItem(b.dataset.k)));
+  renderItems();
+}
+$('hud-item').addEventListener('click', () => {
+  const order = [...ITEM_KEYS, 'random'];
+  setItem(order[(order.indexOf(SET.item) + 1) % order.length]);
+});
+
 /* ---------- 大頭照裁切編輯器：拖曳移動、滑桿／滾輪／兩指縮放 ----------
  * 原圖縮到最長邊 1024px 存 btc-face-src（之後可再按「調整照片」重裁），
  * 裁切參數存 btc-face-crop {cx, cy, zoom}（cx/cy 為原圖座標的圓心），成品 256px 存 btc-face。 */
@@ -1497,7 +1639,7 @@ function gameOver(win) {
   $('gameover-emoji').textContent = win ? '🎉' : '😱';
   $('gameover-title').textContent = win ? '恭喜三關全破！' : '防線失守，你輸了！';
   const acc = G.throws ? Math.round(G.hits / G.throws * 100) : 0;
-  $('gameover-sub').textContent = (win ? `${who}被你打回去三次了！` : `${who}衝過防線了…`) + `　命中 ${G.hits}／${G.throws} 球（${acc}%）`;
+  $('gameover-sub').textContent = (win ? `${who}被你打回去三次了！` : `${who}衝過防線了…`) + `　命中 ${G.hits}／${G.throws} 次（${acc}%）`;
   $('final-score').textContent = G.score;
   const fb = $('final-best');
   fb.textContent = isNew ? '🎉 新紀錄！' : '最高分 ' + G.best;
@@ -1511,7 +1653,7 @@ function gameOver(win) {
 }
 function setMode(mode) {
   G.mode = mode;
-  $('mode-badge').textContent = mode === 'cam' ? '📷 體感模式：手由下往上甩＝丟球（或握拳→張開）' : '🖱️ 滑鼠模式：往上拖曳放開＝丟球，點一下＝瞄準丟';
+  $('mode-badge').textContent = mode === 'cam' ? '📷 體感模式：手由下往上甩＝丟出去（或握拳→張開）' : '🖱️ 滑鼠模式：往上拖曳放開＝丟出去，點一下＝瞄準丟';
   video.classList.toggle('on', mode === 'cam'); $('veil').classList.toggle('on', mode === 'cam');
   canvas.style.cursor = mode === 'cam' ? 'default' : 'none';
 }
@@ -1611,6 +1753,7 @@ $('warn-ok').addEventListener('click', () => { lsSet('btc-warned', '1'); $('warn
 
 /* 測試掛鉤（headless 時 rAF 可能被節流，可手動推進） */
 G._test = {
+  ITEMS, setItem, curItem,
   step: dt => { update(dt); draw(); },
   throwBall, aimedThrow, detectThrow, effThresholds, headInfo, rowsLeft,
   setHeroRow: r => { G.hero.row = r; G.hero.y = heroTargetY(); },
@@ -1619,6 +1762,7 @@ G._test = {
 };
 
 bindPointer();
+buildItemGrid();
 loadFace();
 loadFaceSrc();
 drawPreview();

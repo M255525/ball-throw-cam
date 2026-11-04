@@ -25,8 +25,11 @@
 ## 角色畫風（2026-11-02 使用者要求美化）
 貼紙風 Q 版：所有形狀加深色描邊 `HERO_OL`（`fillOL`／`limb` 先粗深色再細彩色）、衣服左亮右暗漸層（`grad`）、手腳兩段有手肘膝蓋、左右腳前後交替＋手反向擺＋走路上下彈跳（`bob`，只 1% 身高，不影響命中）、大眼高光＋眉毛＋鼻子＋張嘴笑＋腮紅、約 3.6 秒眨眼一次（用 `performance.now()`，預覽畫面也會動）；受擊＝XX 眼＋O 嘴＋汗滴＋舉手亂揮。男生刺蝟瀏海＋翹毛＋耳朵；女生長髮畫在身體後面垂到肩下，前面側分瀏海＋兩側髮束（舊版整圈頭髮繞到下巴像鬍子，已改掉）。**頭的圓心與半徑公式不能動**——要跟 `headInfo()` 一致，命中判定靠它。
 
+## 丟擲物件（2026-11-04 使用者要求可選玻璃杯、椅子等）
+`ITEMS`（ball/glass/chair/pillow/slipper/pie）每種有 size／speed／grav／spin（相對球的倍率）、dmg／push／bonus／max（同時在飛上限，取代舊 `MAX_BALLS`）、slow、snd（命中音效）。`SET.item` 可再選 `random`（每丟一次重抽，`pickNext()`；`G.nextItem` 是實際下一個）。開始畫面 `#item-grid` 選、遊戲中 `#hud-item` 循環切換。**速度／重力倍率要在算初速時一起帶入**（`throwFromGesture`／`aimedThrow`），否則瞄準補償會偏。全部程式繪製（`ITEM_DRAW`，單位座標 r=1）。奶油派糊臉 `drawCream` 疊在角色上層，不動 `drawHero`。拖鞋是藍白拖造型。各物件數值是我自定，使用者可調。
+
 ## 儲存（localStorage，全部 try/catch）
-`btc-settings`（gender/name/sens/ballSpeed/startLevel/sound/assist/debug/outfits）、`btc-face`（256px JPEG dataURL，照片只在本機）、`btc-face-src`、`btc-face-crop`、`btc-best`、`btc-leaderboard`、`btc-cam`、`btc-warned`（首訪警語）、`btcMarquee`。
+`btc-settings`（gender/name/sens/ballSpeed/startLevel/sound/assist/debug/outfits/item）、`btc-face`（256px JPEG dataURL，照片只在本機）、`btc-face-src`、`btc-face-crop`、`btc-best`、`btc-leaderboard`、`btc-cam`、`btc-warned`（首訪警語）、`btcMarquee`。
 
 ## 已知限制
 - 丟球門檻只用合成軌跡驗證過（30fps／15fps 甩手、左上甩會觸發；慢抬手、橫揮、手抖不觸發；糊掉的半段甩手靠放寬補判接住）。第一版使用者實機覺得不順，已放寬＋加補判／輔助／力道環；**改版後尚未有真機回饋**。下一步請使用者開「顯示偵測數值」回報 fps 與上甩速度，再調 `_BASE`。
