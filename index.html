@@ -75,9 +75,6 @@
   #quit-btn { position: absolute; bottom: 12px; right: 12px; pointer-events: auto; font-family: inherit;
     font-size: 13px; color: #fff; background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.25);
     border-radius: 999px; padding: 5px 12px; cursor: pointer; }
-  #hud-sound { position: absolute; bottom: 12px; right: 86px; pointer-events: auto; font-family: inherit;
-    font-size: 13px; color: #fff; background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.25);
-    border-radius: 999px; padding: 5px 12px; cursor: pointer; }
   @media (max-width: 700px) {
     #level-num { top: 58px; font-size: 16px; }
     #score { font-size: 30px; }
@@ -186,7 +183,6 @@
     <div class="hud-right"><div id="rows-left"></div><div id="balls"></div></div>
     <div id="level-banner"></div>
     <div id="mode-badge"></div>
-    <button id="hud-sound" class="sound-toggle" type="button"></button>
     <button id="quit-btn" type="button">✕ 結束</button>
   </div>
 
@@ -223,7 +219,6 @@
       <div id="cam-picker" class="picker hidden"><label for="cam-select">📷 鏡頭：</label><select id="cam-select"></select></div>
       <button id="mouse-btn" class="btn secondary">改用滑鼠／觸控玩 🖱️</button>
       <div class="btn-row">
-        <button id="start-sound" class="btn secondary sound-toggle" type="button"></button>
         <button id="settings-btn" class="btn secondary">⚙ 常用設定</button>
         <a class="btn secondary" href="manual.html" target="_blank" rel="noopener">📖 操作手冊</a>
         <button id="installBtn" class="btn secondary">📲 加入主畫面</button>
@@ -313,7 +308,7 @@
       <select id="set-speed"><option value="slow">慢</option><option value="normal">標準</option><option value="fast">快</option></select></label>
     <label class="row">從第幾關開始
       <select id="set-level"><option value="1">第 1 關</option><option value="2">第 2 關</option><option value="3">第 3 關</option></select></label>
-    <label class="row">音效（命中、丟球、過關） <input type="checkbox" id="set-sound"></label>
+    <label class="row">音效 <input type="checkbox" id="set-sound"></label>
     <button id="reset-records" type="button" class="btn secondary">清除最高分與排行榜</button>
     <button id="settings-ok" class="btn" style="font-size:17px;padding:10px">儲存並關閉</button>
   </div>
@@ -412,13 +407,7 @@ function headInfo(hero) {
 
 /* ---------- 音效（WebAudio 合成） ---------- */
 let AC = null;
-function audio() {
-  if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)();
-  if (AC.state === 'suspended') AC.resume().catch(() => {});
-  return AC;
-}
-// 體感模式的命中發生在偵測迴圈裡、不是使用者點擊，所以要在點按鈕當下先解鎖音訊（iOS Safari 尤其需要）
-function unlockAudio() { if (SET.sound) { try { audio(); } catch (e) {} } }
+function audio() { if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)(); return AC; }
 function tone(type, f0, f1, dur, vol, delay = 0) {
   if (!SET.sound) return;
   try {
@@ -445,32 +434,12 @@ function noise(f0, f1, dur, vol) {
 }
 const sfx = {
   throw: () => noise(500, 2400, 0.18, 0.4),
-  // 命中：低頻「碰」＋高頻「啪」＋往下滑的卡通「哎」；打到頭再加兩聲「叮叮」
-  hit: head => {
-    tone('sine', 190, 55, 0.2, 0.7);
-    noise(2600, 700, 0.09, 0.55);
-    tone('triangle', 900, 300, 0.2, 0.28, 0.04);
-    if (head) { tone('triangle', 1319, 1319, 0.14, 0.26, 0.1); tone('triangle', 1760, 1760, 0.2, 0.26, 0.18); }
-  },
+  hit: () => { tone('square', 420, 140, 0.12, 0.25); noise(1800, 500, 0.1, 0.35); },
   drop: () => tone('sine', 140, 60, 0.25, 0.5),
   level: () => [523, 659, 784, 1047].forEach((f, i) => tone('triangle', f, f, 0.18, 0.25, i * 0.09)),
   lose: () => [392, 330, 262, 196].forEach((f, i) => tone('sawtooth', f, f * 0.95, 0.25, 0.18, i * 0.18)),
   win: () => [523, 659, 784, 1047, 784, 1047].forEach((f, i) => tone('triangle', f, f, 0.22, 0.28, i * 0.12)),
 };
-
-/* 音效開關：開始畫面、遊戲中、常用設定三處共用 SET.sound */
-function renderSound() {
-  document.querySelectorAll('.sound-toggle').forEach(b => {
-    b.textContent = SET.sound ? '🔊 音效：開' : '🔇 音效：關';
-    b.setAttribute('aria-pressed', SET.sound ? 'true' : 'false');
-  });
-}
-function setSound(on) {
-  SET.sound = !!on; saveSet(); renderSound();
-  if (SET.sound) { unlockAudio(); tone('triangle', 880, 880, 0.08, 0.2); }   // 打開時響一聲，順便確認喇叭有聲音
-}
-document.querySelectorAll('.sound-toggle').forEach(b => b.addEventListener('click', () => setSound(!SET.sound)));
-renderSound();
 
 /* ---------- HUD ---------- */
 function renderHUD() {
@@ -770,7 +739,7 @@ function onHit(ball, head) {
   h.row = Math.max(0, h.row - 0.5);           // 打回去半格
   burst(ball.x, ball.y, '#ffd27a', 18, 260);
   addFloater(ball.x, ball.y - 20, (head ? '正中！' : '') + '+' + pts + (G.combo > 1 ? ` ×${G.combo}` : ''), head ? '#ff9f43' : '#fff');
-  sfx.hit(head);
+  sfx.hit();
   if (h.hp <= 0) levelClear();
   renderHUD();
 }
@@ -1610,9 +1579,9 @@ $('save-score-btn').addEventListener('click', () => {
 });
 $('menu-btn').addEventListener('click', backToMenu);
 $('quit-btn').addEventListener('click', () => { if (G.state === 'playing') gameOver(false); });
-$('start-btn').addEventListener('click', () => { unlockAudio(); startCam(); });
-$('mouse-btn').addEventListener('click', () => { unlockAudio(); setMode('mouse'); startGame(); });
-$('restart-btn').addEventListener('click', () => { unlockAudio(); if (G.mode === 'none') setMode('mouse'); startGame(); });
+$('start-btn').addEventListener('click', startCam);
+$('mouse-btn').addEventListener('click', () => { setMode('mouse'); startGame(); });
+$('restart-btn').addEventListener('click', () => { if (G.mode === 'none') setMode('mouse'); startGame(); });
 
 /* ---------- 常用設定 ---------- */
 function openSettings() {
@@ -1628,7 +1597,7 @@ $('settings-ok').addEventListener('click', () => {
   SET.sens = +$('set-sens').value; SET.ballSpeed = $('set-speed').value;
   SET.startLevel = +$('set-level').value; SET.sound = $('set-sound').checked;
   SET.assist = $('set-assist').value; SET.debug = $('set-debug').checked;
-  saveSet(); renderSound();
+  saveSet();
   $('settings-modal').classList.add('hidden');
 });
 $('reset-records').addEventListener('click', () => {
@@ -1642,7 +1611,6 @@ $('warn-ok').addEventListener('click', () => { lsSet('btc-warned', '1'); $('warn
 
 /* 測試掛鉤（headless 時 rAF 可能被節流，可手動推進） */
 G._test = {
-  sfx, setSound, audioState: () => (AC ? AC.state : 'none'),
   step: dt => { update(dt); draw(); },
   throwBall, aimedThrow, detectThrow, effThresholds, headInfo, rowsLeft,
   setHeroRow: r => { G.hero.row = r; G.hero.y = heroTargetY(); },
