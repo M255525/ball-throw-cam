@@ -932,14 +932,41 @@ function drawHero(c, hero, opt = {}) {
     for (let i = 1; i < pts.length; i++) c.lineTo(pts[i][0], pts[i][1]);
     c.strokeStyle = OL; c.lineWidth = w + lw * 2; c.stroke();
     c.strokeStyle = col; c.lineWidth = w; c.stroke();
+    // 亮面：往左上偏一點的細亮線，讓手腳有圓柱立體感
+    c.save(); c.translate(-w * 0.2, -w * 0.05);
+    c.strokeStyle = shade(col, 0.22); c.globalAlpha = 0.7; c.lineWidth = w * 0.28; c.stroke();
+    c.restore();
+  };
+  const star = (sx, sy, R, rot, fill) => {   // 五角星（受擊轉圈的星星）
+    c.beginPath();
+    for (let i = 0; i < 10; i++) { const a = rot + i * Math.PI / 5 - Math.PI / 2, rr = i % 2 ? R * 0.45 : R; c.lineTo(sx + Math.cos(a) * rr, sy + Math.sin(a) * rr); }
+    c.closePath(); fillOL(fill, lw * 0.7);
+  };
+  const hairGrad = () => {   // 頭髮上亮下暗
+    const g = c.createLinearGradient(0, headY - r * 1.15, 0, headY + r * 0.6);
+    g.addColorStop(0, shade(hair, 0.28)); g.addColorStop(0.45, hair); g.addColorStop(1, shade(hair, -0.18));
+    return g;
+  };
+  const backHairMale = () => {   // 男生後髮：讓頭頂有蓬鬆的髮量，照片頭像也會露出來
+    c.beginPath();
+    c.moveTo(x - r * 1.02, headY + r * 0.25);
+    c.arc(x, headY - r * 0.04, r * 1.07, Math.PI * 0.94, Math.PI * 1.25);
+    const tufts = [[-0.62, -1.28, -0.38, -1.06], [-0.2, -1.42, 0.06, -1.1], [0.3, -1.36, 0.5, -1.02]];
+    for (const [tx, ty, ex2, ey2] of tufts) c.quadraticCurveTo(x + r * (tx - 0.12) + dir * r * 0.06, headY + r * ty, x + r * ex2, headY + r * ey2);
+    c.arc(x, headY - r * 0.04, r * 1.07, Math.PI * 1.78, Math.PI * 2.06);
+    c.lineTo(x + r * 1.02, headY + r * 0.25);
+    c.closePath(); fillOL(hairGrad());
   };
   const scallopHem = (xr, xl, yy, n) => {   // 由右往左的波浪下襬
     const step = (xr - xl) / n;
     for (let i = 0; i < n; i++) c.quadraticCurveTo(xr - step * (i + 0.5), yy + h * 0.025, xr - step * (i + 1), yy);
   };
   // 影子
-  c.fillStyle = 'rgba(0,0,0,.22)';
-  c.beginPath(); c.ellipse(x, y + 3, h * 0.2, h * 0.04, 0, 0, TAU); c.fill();
+  c.save(); c.translate(x, y + 3); c.scale(1, 0.2);
+  const shg = c.createRadialGradient(0, 0, 0, 0, 0, h * 0.22);
+  shg.addColorStop(0, 'rgba(0,0,0,.34)'); shg.addColorStop(0.65, 'rgba(0,0,0,.18)'); shg.addColorStop(1, 'rgba(0,0,0,0)');
+  c.fillStyle = shg; c.beginPath(); c.arc(0, 0, h * 0.22, 0, TAU); c.fill();
+  c.restore();
   // 披風（在身體後面，隨走路往後飄）
   if (o.cape && o.cape !== 'none') {
     const fl = -dir * h * (0.08 + 0.03 * Math.abs(sw));
@@ -972,9 +999,20 @@ function drawHero(c, hero, opt = {}) {
     const kx = (hx0 + fx) / 2 + dir * h * (lift > 0 ? 0.025 : 0.008), ky = (hipY + fy) / 2;
     limb([[hx0, hipY], [kx, ky], [fx, fy]], h * 0.072, o.bottom === 'pants' ? o.bottomColor : skin);
     if (o.bottom === 'shorts') limb([[hx0, hipY - h * 0.01], [hx0 + (kx - hx0) * 0.75, hipY + (ky - hipY) * 0.75]], h * 0.092, o.bottomColor);
-    c.beginPath(); c.ellipse(fx + dir * h * 0.02, fy + h * 0.014, h * 0.054, h * 0.03, 0, 0, TAU); fillOL(o.shoes);
-    c.fillStyle = 'rgba(255,255,255,.4)';
-    c.beginPath(); c.ellipse(fx + dir * h * 0.035, fy + h * 0.004, h * 0.016, h * 0.008, 0, 0, TAU); c.fill();
+    // 球鞋：鞋身＋白色鞋底＋鞋帶
+    const heel = fx - dir * h * 0.035, toe = fx + dir * h * 0.078, sole = fy + h * 0.03;
+    c.beginPath();
+    c.moveTo(heel, sole);
+    c.lineTo(heel, fy - h * 0.012);
+    c.quadraticCurveTo(fx, fy - h * 0.034, fx + dir * h * 0.032, fy - h * 0.008);
+    c.quadraticCurveTo(toe + dir * h * 0.004, fy - h * 0.002, toe, sole);
+    c.closePath(); fillOL(grad(o.shoes, Math.min(heel, toe), Math.max(heel, toe)));
+    const soleCol = o.shoes === '#ffffff' ? '#cbd5e1' : '#f8fafc';
+    c.beginPath(); c.roundRect(Math.min(heel, toe) - h * 0.004, sole - h * 0.012, Math.abs(toe - heel) + h * 0.008, h * 0.016, h * 0.006); fillOL(soleCol, lw * 0.8);
+    c.strokeStyle = o.shoes === '#ffffff' ? '#64748b' : 'rgba(255,255,255,.85)'; c.lineWidth = Math.max(1, h * 0.006);
+    for (const k2 of [0.004, 0.02]) { c.beginPath(); c.moveTo(fx + dir * (k2 * h), fy - h * 0.024 + k2 * h * 0.4); c.lineTo(fx + dir * (k2 * h + h * 0.014), fy - h * 0.014 + k2 * h * 0.4); c.stroke(); }
+    c.fillStyle = 'rgba(255,255,255,.45)';
+    c.beginPath(); c.ellipse(fx + dir * h * 0.05, fy, h * 0.013, h * 0.006, -dir * 0.4, 0, TAU); c.fill();
   }
   // 裙子
   if (o.bottom === 'skirt') {
@@ -1038,6 +1076,13 @@ function drawHero(c, hero, opt = {}) {
       for (const s of [-1, 1]) { c.beginPath(); c.moveTo(x + s * h * 0.03, shY + h * 0.01); c.lineTo(x + s * h * 0.035, shY + h * 0.11); c.stroke(); c.beginPath(); c.arc(x + s * h * 0.035, shY + h * 0.115, h * 0.008, 0, TAU); c.fillStyle = '#ffffff'; c.fill(); }
     }
     if (o.top !== 'suit') { c.fillStyle = 'rgba(0,0,0,.18)'; c.fillRect(x - tw, bodyBottom - h * 0.025, tw * 2, h * 0.025); }
+    // 賽璐珞陰影：右側一塊弧形暗面＋領口下的陰影＋一條衣服皺褶
+    c.fillStyle = 'rgba(40,20,80,.16)';
+    c.beginPath(); c.moveTo(x + tw * 0.45, shY); c.quadraticCurveTo(x + tw * 0.2, (shY + bodyBottom) / 2, x + tw * 0.55, bodyBottom);
+    c.lineTo(x + tw, bodyBottom); c.lineTo(x + tw, shY); c.closePath(); c.fill();
+    c.beginPath(); c.ellipse(x, shY + h * 0.01, h * 0.07, h * 0.025, 0, 0, TAU); c.fillStyle = 'rgba(40,20,80,.22)'; c.fill();
+    c.strokeStyle = 'rgba(40,20,80,.25)'; c.lineWidth = lw * 0.7;
+    c.beginPath(); c.moveTo(x - tw * 0.55, bodyBottom - h * 0.06); c.quadraticCurveTo(x - tw * 0.3, bodyBottom - h * 0.09, x - tw * 0.1, bodyBottom - h * 0.075); c.stroke();
     c.restore();
     torsoPath(); c.strokeStyle = OL; c.lineWidth = lw; c.stroke();
     if (o.top === 'tshirt' || o.top === 'stripe') neckline();
@@ -1060,18 +1105,30 @@ function drawHero(c, hero, opt = {}) {
       limb([[sx, sy], [ex, ey], [hx, hy]], h * 0.048, skin);
       limb([[sx, sy], [sx + (ex - sx) * 0.6, sy + (ey - sy) * 0.6]], h * 0.06, o.top === 'dress' ? shade(o.topColor, 0.1) : o.topColor);
     }
+    // 手：拇指＋手掌（拇指朝身體內側）
+    const tdx = hitT > 0 ? -s * h * 0.022 : -s * h * 0.026, tdy = hitT > 0 ? -h * 0.024 : -h * 0.008;
+    c.beginPath(); c.ellipse(hx + tdx, hy + tdy, h * 0.015, h * 0.02, -s * 0.5, 0, TAU); fillOL(skin, lw * 0.85);
     c.beginPath(); c.arc(hx, hy, h * 0.036, 0, TAU); fillOL(skin);
+    c.fillStyle = 'rgba(255,255,255,.45)'; c.beginPath(); c.arc(hx - h * 0.012, hy - h * 0.013, h * 0.01, 0, TAU); c.fill();
   }
   // 頭
   const look = dir * r * 0.06, ex = r * 0.36, ey = headY + r * 0.1;
   if (faceImg) {
+    if (!female) backHairMale();
     c.save(); c.beginPath(); c.arc(x, headY, r, 0, TAU); c.clip();
     c.drawImage(faceImg, x - r, headY - r, r * 2, r * 2);
+    // 照片頭像的立體感：邊緣暗角＋左上高光
+    const vg = c.createRadialGradient(x - r * 0.2, headY - r * 0.25, r * 0.45, x, headY, r * 1.02);
+    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(30,15,40,.32)');
+    c.fillStyle = vg; c.fillRect(x - r, headY - r, r * 2, r * 2);
     if (hitT > 0) { c.fillStyle = `rgba(255,40,40,${0.45 * hitT})`; c.fillRect(x - r, headY - r, r * 2, r * 2); }
+    c.strokeStyle = 'rgba(255,255,255,.4)'; c.lineWidth = r * 0.07;
+    c.beginPath(); c.arc(x, headY, r * 0.86, 1.15 * Math.PI, 1.4 * Math.PI); c.stroke();
     c.restore();
     c.strokeStyle = hair; c.lineWidth = r * 0.12; c.beginPath(); c.arc(x, headY, r, 0, TAU); c.stroke();
     c.strokeStyle = OL; c.lineWidth = lw; c.beginPath(); c.arc(x, headY, r * 1.06, 0, TAU); c.stroke();
   } else {
+    if (!female) backHairMale();
     if (!female) for (const s of [-1, 1]) {
       c.beginPath(); c.arc(x + s * r * 0.95, headY + r * 0.1, r * 0.2, 0, TAU); fillOL(skin);
       c.fillStyle = skinD; c.beginPath(); c.arc(x + s * r * 0.97, headY + r * 0.1, r * 0.09, 0, TAU); c.fill();
@@ -1079,39 +1136,63 @@ function drawHero(c, hero, opt = {}) {
     const fg = c.createRadialGradient(x - r * 0.3, headY - r * 0.35, r * 0.1, x, headY, r * 1.05);
     fg.addColorStop(0, '#ffe2c6'); fg.addColorStop(1, skin);
     c.beginPath(); c.arc(x, headY, r, 0, TAU); fillOL(fg);
-    // 前髮
-    if (female) {
+    // 前髮（路徑抽成函式：先往下位移畫一次當額頭上的髮影，再畫本體）
+    const bangsPath = () => {
       c.beginPath();
-      c.moveTo(x - r * 1.08, headY + r * 0.72);
-      c.lineTo(x - r * 1.1, headY);
-      c.arc(x, headY, r * 1.1, Math.PI, TAU);
-      c.lineTo(x + r * 1.08, headY + r * 0.72);
-      c.quadraticCurveTo(x + r * 0.95, headY + r * 0.8, x + r * 0.82, headY + r * 0.58);
-      c.quadraticCurveTo(x + r * 0.86, headY - r * 0.1, x + r * 0.55, headY - r * 0.36);
-      c.quadraticCurveTo(x + r * 0.05, headY - r * 0.16, x - r * 0.35, headY - r * 0.48);
-      c.quadraticCurveTo(x - r * 0.72, headY - r * 0.2, x - r * 0.8, headY + r * 0.2);
-      c.quadraticCurveTo(x - r * 0.84, headY + r * 0.45, x - r * 0.82, headY + r * 0.58);
-      c.quadraticCurveTo(x - r * 0.95, headY + r * 0.8, x - r * 1.08, headY + r * 0.72);
-      c.closePath(); fillOL(hair);
-    } else {
-      c.beginPath();
-      c.moveTo(x - r * 1.0, headY + r * 0.2);
-      c.arc(x, headY, r * 1.05, Math.PI * 0.97, Math.PI * 2.03);
-      c.lineTo(x + r * 1.0, headY + r * 0.2);
-      c.lineTo(x + r * 0.84, headY - r * 0.12);
-      for (let i = 0; i <= 6; i++) c.lineTo(x + look * 1.5 + r * 0.8 - i * (r * 1.6 / 6), headY - (i % 2 ? r * 0.3 : r * 0.5));
-      c.lineTo(x - r * 0.84, headY - r * 0.12);
-      c.closePath(); fillOL(hair);
+      if (female) {
+        c.moveTo(x - r * 1.08, headY + r * 0.72);
+        c.lineTo(x - r * 1.1, headY);
+        c.arc(x, headY, r * 1.1, Math.PI, TAU);
+        c.lineTo(x + r * 1.08, headY + r * 0.72);
+        c.quadraticCurveTo(x + r * 0.95, headY + r * 0.8, x + r * 0.82, headY + r * 0.58);
+        c.quadraticCurveTo(x + r * 0.86, headY - r * 0.1, x + r * 0.55, headY - r * 0.36);
+        c.quadraticCurveTo(x + r * 0.32, headY - r * 0.12, x + r * 0.12, headY - r * 0.3);
+        c.quadraticCurveTo(x - r * 0.08, headY - r * 0.2, x - r * 0.35, headY - r * 0.48);
+        c.quadraticCurveTo(x - r * 0.72, headY - r * 0.2, x - r * 0.8, headY + r * 0.2);
+        c.quadraticCurveTo(x - r * 0.84, headY + r * 0.45, x - r * 0.82, headY + r * 0.58);
+        c.quadraticCurveTo(x - r * 0.95, headY + r * 0.8, x - r * 1.08, headY + r * 0.72);
+      } else {
+        c.moveTo(x - r * 1.0, headY + r * 0.2);
+        c.arc(x, headY, r * 1.05, Math.PI * 0.97, Math.PI * 2.03);
+        c.lineTo(x + r * 1.0, headY + r * 0.2);
+        c.quadraticCurveTo(x + r * 0.96, headY - r * 0.02, x + r * 0.84, headY - r * 0.12);
+        // 柔和的髮尖：每一撮用曲線收尖，整排略往行走方向偏
+        let px = x + r * 0.84, py = headY - r * 0.12;
+        for (let i = 0; i <= 6; i++) {
+          const nx = x + look * 1.5 + r * 0.8 - i * (r * 1.6 / 6), ny = headY - (i % 2 ? r * 0.26 : r * 0.5);
+          c.quadraticCurveTo((px + nx) / 2 + dir * r * 0.05, i % 2 ? ny - r * 0.06 : py - r * 0.02, nx, ny);
+          px = nx; py = ny;
+        }
+        c.quadraticCurveTo(x - r * 0.96, headY - r * 0.02, x - r * 1.0, headY + r * 0.2);
+      }
+      c.closePath();
+    };
+    c.save(); c.beginPath(); c.arc(x, headY, r, 0, TAU); c.clip();
+    c.translate(dir * r * 0.03, r * 0.1); bangsPath(); c.fillStyle = 'rgba(190,100,70,.28)'; c.fill();
+    c.restore();
+    bangsPath(); fillOL(hairGrad());
+    if (!female) {   // 頭頂翹毛
       c.beginPath(); c.moveTo(x - r * 0.12, headY - r * 0.98);
       c.quadraticCurveTo(x + dir * r * 0.05, headY - r * 1.4, x + dir * r * 0.32, headY - r * 1.3);
       c.quadraticCurveTo(x + dir * r * 0.08, headY - r * 1.2, x + r * 0.14, headY - r * 0.98);
-      fillOL(hair);
+      fillOL(hairGrad());
     }
-    c.strokeStyle = 'rgba(255,255,255,.3)'; c.lineWidth = r * 0.09;
-    c.beginPath(); c.arc(x, headY, r * 0.82, 1.18 * Math.PI, 1.42 * Math.PI); c.stroke();
+    // 髮絲光澤環
+    c.strokeStyle = 'rgba(255,255,255,.42)'; c.lineWidth = r * 0.075;
+    c.beginPath(); c.arc(x, headY + r * 0.02, r * 0.84, 1.2 * Math.PI, 1.38 * Math.PI); c.stroke();
+    c.lineWidth = r * 0.05;
+    c.beginPath(); c.arc(x, headY + r * 0.02, r * 0.84, 1.44 * Math.PI, 1.52 * Math.PI); c.stroke();
+    c.strokeStyle = 'rgba(0,0,0,.18)'; c.lineWidth = r * 0.03;   // 髮絲線
+    for (const k3 of [-0.45, 0.05, 0.5]) { c.beginPath(); c.moveTo(x + r * k3, headY - r * 0.95); c.quadraticCurveTo(x + r * (k3 + 0.08), headY - r * 0.7, x + r * (k3 + 0.02), headY - r * 0.48); c.stroke(); }
     // 臉
-    c.fillStyle = female ? 'rgba(255,110,140,.45)' : 'rgba(255,120,110,.28)';
-    for (const s of [-1, 1]) { c.beginPath(); c.ellipse(x + s * r * 0.58 + look, headY + r * 0.38, r * 0.15, r * 0.1, 0, 0, TAU); c.fill(); }
+    for (const s of [-1, 1]) {   // 柔和腮紅＋三條小斜線
+      const bx = x + s * r * 0.58 + look, by = headY + r * 0.38;
+      const bg = c.createRadialGradient(bx, by, 0, bx, by, r * 0.2);
+      bg.addColorStop(0, female ? 'rgba(255,105,140,.6)' : 'rgba(255,120,110,.45)'); bg.addColorStop(1, 'rgba(255,120,130,0)');
+      c.fillStyle = bg; c.beginPath(); c.ellipse(bx, by, r * 0.2, r * 0.13, 0, 0, TAU); c.fill();
+      c.strokeStyle = 'rgba(230,80,100,.45)'; c.lineWidth = r * 0.022;
+      for (let k = -1; k <= 1; k++) { c.beginPath(); c.moveTo(bx + k * r * 0.06 + r * 0.02, by - r * 0.04); c.lineTo(bx + k * r * 0.06 - r * 0.02, by + r * 0.04); c.stroke(); }
+    }
     if (hitT > 0) {
       c.strokeStyle = OL; c.lineWidth = r * 0.1;
       for (const s of [-1, 1]) { const cx = x + s * ex; c.beginPath(); c.moveTo(cx - r * .12, ey - r * .12); c.lineTo(cx + r * .12, ey + r * .12); c.moveTo(cx + r * .12, ey - r * .12); c.lineTo(cx - r * .12, ey + r * .12); c.stroke(); }
@@ -1128,10 +1209,22 @@ function drawHero(c, hero, opt = {}) {
           c.strokeStyle = OL; c.lineWidth = r * 0.07;
           c.beginPath(); c.arc(cx, ey - r * 0.04, r * 0.1, 0.15 * Math.PI, 0.85 * Math.PI); c.stroke();
         } else {
-          c.fillStyle = OL; c.beginPath(); c.ellipse(cx, ey, r * 0.1, r * 0.135, 0, 0, TAU); c.fill();
-          c.fillStyle = '#ffffff'; c.beginPath(); c.arc(cx + r * 0.03, ey - r * 0.05, r * 0.042, 0, TAU); c.fill();
-          c.beginPath(); c.arc(cx - r * 0.035, ey + r * 0.05, r * 0.018, 0, TAU); c.fill();
-          if (female) { c.strokeStyle = OL; c.lineWidth = r * 0.045; c.beginPath(); c.moveTo(cx + s * r * 0.07, ey - r * 0.09); c.lineTo(cx + s * r * 0.15, ey - r * 0.15); c.stroke(); }
+          // 動漫大眼：深色眼框→虹膜漸層→瞳孔→雙高光→上眼線
+          const erx = r * 0.12, ery = r * 0.165;
+          c.fillStyle = OL; c.beginPath(); c.ellipse(cx, ey, erx, ery, 0, 0, TAU); c.fill();
+          const ig = c.createLinearGradient(0, ey - ery, 0, ey + ery);
+          const iris = female ? '#a05bd6' : '#8a5a2b';
+          ig.addColorStop(0, OL); ig.addColorStop(0.45, shade(iris, -0.2)); ig.addColorStop(1, shade(iris, 0.45));
+          c.fillStyle = ig; c.beginPath(); c.ellipse(cx, ey + ery * 0.08, erx * 0.78, ery * 0.8, 0, 0, TAU); c.fill();
+          c.fillStyle = OL; c.beginPath(); c.ellipse(cx, ey + ery * 0.05, erx * 0.36, ery * 0.42, 0, 0, TAU); c.fill();
+          c.fillStyle = '#ffffff'; c.beginPath(); c.ellipse(cx + erx * 0.32, ey - ery * 0.38, r * 0.05, r * 0.06, 0.3, 0, TAU); c.fill();
+          c.beginPath(); c.arc(cx - erx * 0.36, ey + ery * 0.42, r * 0.022, 0, TAU); c.fill();
+          c.strokeStyle = OL; c.lineWidth = r * 0.065;
+          c.beginPath(); c.ellipse(cx, ey + r * 0.01, erx * 1.12, ery * 1.04, 0, 1.12 * Math.PI, 1.9 * Math.PI); c.stroke();
+          if (female) {   // 睫毛
+            c.lineWidth = r * 0.04;
+            for (const k of [0, 1]) { c.beginPath(); c.moveTo(cx + s * erx * (0.85 + k * 0.1), ey - ery * (0.75 - k * 0.3)); c.lineTo(cx + s * (erx + r * 0.08), ey - ery * (1.0 - k * 0.38)); c.stroke(); }
+          }
         }
         c.strokeStyle = shade(hair, -0.15); c.lineWidth = r * (female ? 0.05 : 0.075);
         c.beginPath(); c.moveTo(cx - r * 0.1, ey - r * 0.25); c.quadraticCurveTo(cx, ey - r * 0.32, cx + r * 0.1, ey - r * 0.26); c.stroke();
@@ -1143,7 +1236,10 @@ function drawHero(c, hero, opt = {}) {
       c.quadraticCurveTo(mx, headY + r * 0.48, mx + r * 0.18, headY + r * 0.43);
       c.quadraticCurveTo(mx, headY + r * 0.76, mx - r * 0.18, headY + r * 0.43);
       fillOL(female ? '#c2185b' : '#8c2d3a', lw * 0.8);
-      c.fillStyle = '#ff8fa3'; c.beginPath(); c.ellipse(mx, headY + r * 0.56, r * 0.07, r * 0.04, 0, 0, TAU); c.fill();
+      c.save(); c.clip();
+      c.fillStyle = '#ffffff'; c.fillRect(mx - r * 0.2, headY + r * 0.42, r * 0.4, r * 0.06);   // 上排牙齒
+      c.fillStyle = '#ff8fa3'; c.beginPath(); c.ellipse(mx, headY + r * 0.6, r * 0.09, r * 0.06, 0, 0, TAU); c.fill();
+      c.restore();
     }
   }
   // 眼鏡
@@ -1197,7 +1293,16 @@ function drawHero(c, hero, opt = {}) {
     c.beginPath(); c.roundRect(x - r * 0.12, top - r * 0.2, r * 0.24, r * 0.7, r * 0.06); fillOL('#fde047', lw * 0.7);
     hatH = r * 0.25;
   }
-  if (hitT > 0) { c.font = `${r * 0.8}px sans-serif`; c.textAlign = 'center'; c.fillText('💢', x + r * 1.1, headY - r * 0.7); }
+  if (hitT > 0) {
+    c.font = `${r * 0.8}px sans-serif`; c.textAlign = 'center'; c.fillText('💢', x + r * 1.1, headY - r * 0.7);
+    // 頭上繞圈的暈眩星星
+    for (let i = 0; i < 3; i++) {
+      const a = G.time * 7 + i * TAU / 3, sx = x + Math.cos(a) * r * 1.2, sy = headY - r * 1.15 + Math.sin(a) * r * 0.3;
+      c.globalAlpha = Math.min(1, hitT * 3);
+      star(sx, sy, r * (0.22 + 0.07 * Math.sin(a)), G.time * 5, ['#fde047', '#fb923c', '#f9a8d4'][i]);
+    }
+    c.globalAlpha = 1;
+  }
   // 名字＋血條（有頭飾時往上讓位）
   if (!opt.preview && hero.maxHp) {
     const bw = Math.max(70, h * 0.6), by = headY - r - 16 - hatH;
