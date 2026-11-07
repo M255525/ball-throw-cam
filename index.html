@@ -12,6 +12,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="體感丟球">
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: #0b1020; font-family: "Microsoft JhengHei", "Noto Sans TC", sans-serif; }
@@ -35,6 +36,12 @@
 
   #cam { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); background: #0b1020; display: none; }
   #cam.on { display: block; }
+  /* 3D 情境背景（scene3d.js）：畫在遊戲畫布後面；體感模式下攝影機畫面縮成左下角小視窗 */
+  #scene3d { position: absolute; inset: 0; width: 100%; height: 100%; display: none; }
+  body.has3d #scene3d { display: block; }
+  #cam.on.pip { inset: auto; left: 12px; bottom: 52px; width: min(26vw, 220px); height: auto; aspect-ratio: 16 / 9;
+    border-radius: 12px; border: 2px solid rgba(255,255,255,.7); box-shadow: 0 6px 20px rgba(0,0,0,.45); z-index: 2; pointer-events: none; }
+  body.has3d #start-screen { background: radial-gradient(ellipse at 50% 25%, rgba(31,47,94,.55) 0%, rgba(11,16,32,.78) 75%); }
   #veil { position: absolute; inset: 0; background: rgba(5, 10, 30, 0.38); pointer-events: none; display: none; }
   #veil.on { display: block; }
   #game { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: none; }
@@ -182,6 +189,7 @@
 <body>
 <div id="marqueeBar"><div id="marqueeTrack"></div></div>
 <div id="app">
+  <canvas id="scene3d"></canvas>
   <video id="cam" autoplay playsinline muted></video>
   <div id="veil"></div>
   <canvas id="game"></canvas>
@@ -327,6 +335,8 @@
       <select id="set-speed"><option value="slow">慢</option><option value="normal">標準</option><option value="fast">快</option></select></label>
     <label class="row">從第幾關開始
       <select id="set-level"><option value="1">第 1 關</option><option value="2">第 2 關</option><option value="3">第 3 關</option></select></label>
+    <label class="row">🏞 背景
+      <select id="set-bg"><option value="3d">3D 情境（攝影機畫面縮到左下角）</option><option value="cam">攝影機畫面（電腦跑不動時用）</option></select></label>
     <label class="row">音效 <input type="checkbox" id="set-sound"></label>
     <button id="reset-records" type="button" class="btn secondary">清除最高分與排行榜</button>
     <button id="settings-ok" class="btn" style="font-size:17px;padding:10px">儲存並關閉</button>
@@ -346,9 +356,9 @@ const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/hand_landmark
 
 /* 三關：血量、橫向速度（畫面寬比例/秒）、每次降格高度（畫面高比例）、閃避機率 */
 const LEVELS = [
-  { name: '第 1 關', hp: 8,  speed: 0.16, rowStep: 0.075, dodge: 0,    tricky: false },
-  { name: '第 2 關', hp: 12, speed: 0.23, rowStep: 0.085, dodge: 0.15, tricky: false },
-  { name: '第 3 關', hp: 16, speed: 0.30, rowStep: 0.095, dodge: 0.28, tricky: true  },
+  { name: '第 1 關・校園操場', hp: 8,  speed: 0.16, rowStep: 0.075, dodge: 0,    tricky: false },
+  { name: '第 2 關・夜市', hp: 12, speed: 0.23, rowStep: 0.085, dodge: 0.15, tricky: false },
+  { name: '第 3 關・頂樓煙火', hp: 16, speed: 0.30, rowStep: 0.095, dodge: 0.28, tricky: true  },
 ];
 /* 可丟物件：size 大小、speed 飛行速度、grav 重力、spin 旋轉，都是相對球的倍率；
  * dmg 扣血、push 推回格數、bonus 額外得分、max 同時在飛上限、slow 命中後角色變慢秒數 */
@@ -387,7 +397,7 @@ const HAND_CONN = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],
 
 /* ---------- 設定（localStorage，讀寫都包 try/catch） ---------- */
 const SET_KEY = 'btc-settings';
-const SET = Object.assign({ gender: 'male', name: '', sens: 3, ballSpeed: 'normal', startLevel: 1, sound: true, assist: 'low', debug: false, item: 'ball' },
+const SET = Object.assign({ gender: 'male', name: '', sens: 3, ballSpeed: 'normal', startLevel: 1, sound: true, assist: 'low', debug: false, item: 'ball', bg: '3d' },
   (() => { try { return JSON.parse(localStorage.getItem(SET_KEY) || '{}'); } catch (e) { return {}; } })());
 function saveSet() { try { localStorage.setItem(SET_KEY, JSON.stringify(SET)); } catch (e) {} }
 function lsGet(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } }
@@ -416,12 +426,14 @@ function loadFace() {
 
 /* ---------- 畫布尺寸：用 #app 實際大小（跑馬燈出現時 #app 會縮短） ---------- */
 let W = 0, H = 0;
+let S3 = null;                  // 3D 情境背景（scene3d.js 載入後才有）
 function resize() {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   W = app.clientWidth || window.innerWidth; H = app.clientHeight || window.innerHeight;
   canvas.width = W * dpr; canvas.height = H * dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   if (G.hero) G.hero.x = Math.min(Math.max(G.hero.x, heroMargin()), W - heroMargin());
+  if (S3) { S3.resize(W, H); s3Marks(); }
 }
 window.addEventListener('resize', resize);
 if (window.ResizeObserver) new ResizeObserver(resize).observe(app);
@@ -751,6 +763,7 @@ function setupLevel(l) {
   G.balls = [];
   showBanner(LEVELS[l].name);
   renderHUD();
+  if (S3) { S3.setLevel(l); s3Marks(); }
 }
 function startGame() {
   G.state = 'playing';
@@ -764,6 +777,7 @@ function startGame() {
 function dropRow() {
   G.hero.row += 1;
   sfx.drop(); shake();
+  if (S3) S3.onDrop();
   renderHUD();
 }
 function burst(x, y, color, n, speed) {
@@ -786,6 +800,7 @@ function onHit(ball, head) {
   burst(ball.x, ball.y, it.color, 18, 260);
   addFloater(ball.x, ball.y - 20, (head ? '正中！' : '') + '+' + pts + (G.combo > 1 ? ` ×${G.combo}` : ''), head ? '#ff9f43' : '#fff');
   it.snd();
+  if (S3) S3.onHit(ball.x, ball.y, head || it.dmg > 1);
   if (h.hp <= 0) levelClear();
   renderHUD();
 }
@@ -793,6 +808,7 @@ function levelClear() {
   const bonus = 100 * (G.level + 1) + Math.round(rowsLeft() * 20);
   G.score += bonus;
   addFloater(W / 2, H * 0.4, '過關獎勵 +' + bonus, '#7CFFB2');
+  if (S3) S3.celebrate();
   if (G.level >= LEVELS.length - 1) { sfx.win(); gameOver(true); return; }
   sfx.level();
   setupLevel(G.level + 1);
@@ -1314,7 +1330,8 @@ function drawDebug() {
   ];
   ctx.save();
   ctx.font = '13px "Microsoft JhengHei", sans-serif'; ctx.textAlign = 'left';
-  const bw = 330, bh = lines.length * 19 + 12, bx = 10, by = H - bh - 52;
+  const pipH = video.classList.contains('pip') ? video.offsetHeight + 10 : 0;   // 讓開左下角的攝影機小視窗
+  const bw = 330, bh = lines.length * 19 + 12, bx = 10, by = H - bh - 52 - pipH;
   ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(bx, by, bw, bh);
   ctx.fillStyle = '#fff';
   lines.forEach((l, i) => ctx.fillText(l, bx + 8, by + 20 + i * 19));
@@ -1334,7 +1351,7 @@ function drawCursor() {
 }
 function draw() {
   ctx.clearRect(0, 0, W, H);
-  if (G.mode !== 'cam') {
+  if (!use3D() && G.mode !== 'cam') {
     const gr = ctx.createLinearGradient(0, 0, 0, H);
     gr.addColorStop(0, '#20325f'); gr.addColorStop(0.8, '#1a2747'); gr.addColorStop(0.8, '#2a3a2a'); gr.addColorStop(1, '#1d2a1d');
     ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H);
@@ -1383,6 +1400,10 @@ function loop(t) {
   if (G.mode === 'cam') detectHands();
   update(dt);
   draw();
+  if (use3D()) {
+    S3.setDanger(G.state === 'playing' && G.hero && rowsLeft() <= 1.01 ? 1 : 0);
+    S3.frame(dt, G.state !== 'playing');
+  }
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
@@ -1654,7 +1675,8 @@ function gameOver(win) {
 function setMode(mode) {
   G.mode = mode;
   $('mode-badge').textContent = mode === 'cam' ? '📷 體感模式：手由下往上甩＝丟出去（或握拳→張開）' : '🖱️ 滑鼠模式：往上拖曳放開＝丟出去，點一下＝瞄準丟';
-  video.classList.toggle('on', mode === 'cam'); $('veil').classList.toggle('on', mode === 'cam');
+  video.classList.toggle('on', mode === 'cam');
+  applyBg();
   canvas.style.cursor = mode === 'cam' ? 'default' : 'none';
 }
 function camErrorText(e) {
@@ -1694,6 +1716,7 @@ async function startCam() {
 }
 function backToMenu() {
   G.state = 'start'; G.hero = null; G.balls = [];
+  if (S3) { S3.setLevel(0); S3.clearMarks(); }
   $('gameover-screen').classList.add('hidden');
   $('hud').classList.remove('on');
   $('start-screen').classList.remove('hidden');
@@ -1729,7 +1752,7 @@ $('restart-btn').addEventListener('click', () => { if (G.mode === 'none') setMod
 function openSettings() {
   $('set-name').value = SET.name; $('set-sens').value = SET.sens; $('set-sens-val').textContent = SET.sens;
   $('set-speed').value = SET.ballSpeed; $('set-level').value = SET.startLevel; $('set-sound').checked = !!SET.sound;
-  $('set-assist').value = SET.assist; $('set-debug').checked = !!SET.debug;
+  $('set-assist').value = SET.assist; $('set-debug').checked = !!SET.debug; $('set-bg').value = SET.bg || '3d';
   $('settings-modal').classList.remove('hidden');
 }
 $('set-sens').addEventListener('input', e => { $('set-sens-val').textContent = e.target.value; });
@@ -1738,7 +1761,8 @@ $('settings-ok').addEventListener('click', () => {
   SET.name = $('set-name').value.trim().slice(0, 8);
   SET.sens = +$('set-sens').value; SET.ballSpeed = $('set-speed').value;
   SET.startLevel = +$('set-level').value; SET.sound = $('set-sound').checked;
-  SET.assist = $('set-assist').value; SET.debug = $('set-debug').checked;
+  SET.assist = $('set-assist').value; SET.debug = $('set-debug').checked; SET.bg = $('set-bg').value;
+  applyBg();
   saveSet();
   $('settings-modal').classList.add('hidden');
 });
@@ -1758,8 +1782,34 @@ G._test = {
   throwBall, aimedThrow, detectThrow, effThresholds, headInfo, rowsLeft,
   setHeroRow: r => { G.hero.row = r; G.hero.y = heroTargetY(); },
   forceEdge: () => { G.hero.dashT = 0; G.hero.pauseT = 0; G.hero.dir = 1; G.hero.x = W - heroMargin() - 0.5; },
+  s3: () => S3, use3D, applyBg,
   set: SET, curOutfit, ward: WARD, drawHero, release: handleReleaseForTest, throwFromGesture, crop: CROP, cropApply, cropSetZoom,
 };
+
+/* ---------- 3D 情境背景：動態載入，Three.js 載不到就維持原本的 2D 漸層背景 ---------- */
+function use3D() { return !!S3 && !(G.mode === 'cam' && SET.bg === 'cam'); }
+function applyBg() {
+  const on3 = use3D();
+  document.body.classList.toggle('has3d', on3);
+  video.classList.toggle('pip', on3 && G.mode === 'cam');
+  $('veil').classList.toggle('on', G.mode === 'cam' && !on3);
+}
+function s3Marks() {
+  if (!S3) return;
+  if (!G.hero || G.state !== 'playing') { S3.clearMarks(); return; }
+  const ys = [], ly = lineY(), step = rowStepPx();
+  for (let y = topFeet(); y < ly - step * 0.3; y += step) ys.push(y);
+  S3.setMarks(ys, ly);
+}
+import('./scene3d.js').then(m => {
+  try {
+    S3 = m.createScene3D($('scene3d'));
+    S3.resize(W, H);
+    S3.setLevel(G.hero ? G.level : 0);
+    s3Marks();
+    applyBg();
+  } catch (e) { console.warn('3D 情境初始化失敗，改用 2D 背景', e); S3 = null; }
+}).catch(e => console.warn('3D 情境載入失敗，改用 2D 背景', e));
 
 bindPointer();
 buildItemGrid();
